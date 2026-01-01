@@ -59,6 +59,7 @@ class DSSE
             SecByteBlock client_sk;
             rocksdb::DB* map1;                                                                          // client-side map Sigma
             rocksdb::DB* map2;                                                                          // server-side map T
+            rocksdb::DB* map3_sorted_index;                                                             // sorted index map
         };
 
         SetupResult Data;

@@ -3,12 +3,13 @@
 #include <string>
 #include <tuple>
 #include <algorithm>
+#include <rocksdb/db.h>
 
 using namespace std;
 
 static const int RANGE = 100;
 
-vector<tuple<int, int>> esGen(vector<tuple<string, int>> &inp)
+vector<tuple<int, int>> esGen(vector<tuple<string, int>> &inp, rocksdb::DB* sorted_index_db)
 {
     vector<tuple<int, int>> res(RANGE, make_tuple(0, -1));
 
@@ -23,11 +24,14 @@ vector<tuple<int, int>> esGen(vector<tuple<string, int>> &inp)
     });
 
 
-    //debug print
-    // for(int i=0 ; i<inp.size() ; i++)
-    // {
-    //     cout<<i<<" - "<<get<0>(inp[i])<<" : "<<get<1>(inp[i])<<endl;
-    // }
+    // debug print
+    for(int i=0 ; i<inp.size() ; i++)
+    {
+        cout<<i<<" - "<<get<0>(inp[i])<<" : "<<get<1>(inp[i])<<endl;
+        if(sorted_index_db) {
+            sorted_index_db->Put(rocksdb::WriteOptions(), to_string(i), get<0>(inp[i]));
+        }
+    }
 
     int match = get<1>(inp[0]);
     get<0>(res[match]) = 0;
@@ -59,11 +63,11 @@ vector<tuple<int, int>> esGen(vector<tuple<string, int>> &inp)
     return res;
 }
 
-vector<tuple<int, int>> DBConversion(vector<tuple<string, int>> &inp){
+vector<tuple<int, int>> DBConversion(vector<tuple<string, int>> &inp, rocksdb::DB* sorted_index_db){
     vector<tuple<int, int>> res;
     res.reserve(RANGE*2);
 
-    auto res1 = esGen(inp);
+    auto res1 = esGen(inp, sorted_index_db);
 
     //debug print
     // for(int i=0 ; i<res1.size() ; i++){

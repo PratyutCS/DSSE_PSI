@@ -25,8 +25,16 @@ void DSSE::Setup()
         exit(1);
     }
 
+    rocksdb::DB* db3;
+    rocksdb::Status status3 = rocksdb::DB::Open(options, "Sorted_Index_map3", &db3);
+    if (!status3.ok()) {
+        std::cerr << "Error opening RocksDB for map3: " << status3.ToString() << std::endl;
+        exit(1);
+    }
+
     this->Data.map1 = db1;
     this->Data.map2 = db2;
+    this->Data.map3_sorted_index = db3;
 
     cout << " FAST: Setup Ends Here;" << endl;
 

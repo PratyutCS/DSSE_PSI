@@ -39,19 +39,19 @@ int main(){
 
     cout << "============================= PSI: Generate Random Input =============================" << endl; 
     start = chrono::high_resolution_clock::now();
-    vector<tuple<string, int>> inp = generate_random_input(100000000);
+    vector<tuple<string, int>> inp = generate_random_input(10);
     end = chrono::high_resolution_clock::now();
     elapsed = end - start;
     cout << "Generate Random Input took: " << elapsed.count() << " seconds" << endl;
 
     cout << "============================= PSI: DB Conversion =============================" << endl; 
     start = chrono::high_resolution_clock::now();
-    auto res = DBConversion(inp);
+    auto res = DBConversion(inp, FAST_.Data.map3_sorted_index);
     end = chrono::high_resolution_clock::now();
     elapsed = end - start;
     cout << "DB Conversion took: " << elapsed.count() << " seconds" << endl;
 
-    //debug print
+    // debug print
     // for(int i=0 ; i<res.size() ; i++){
     //     cout<<i<<" - "<<get<0>(res[i])<<" : "<<get<1>(res[i])<<endl;
     // }
@@ -152,7 +152,24 @@ int main(){
 
         // AND Operation: Intersect param1 GE and param2 LE
         BitSequence<uint64_t> result_bitmap = param1_GE_bitmap.bitwise_and(param2_LE_bitmap);
-        // cout << "result bitmap (GE & LE) is : "; result_bitmap.print_range(0, inp.size());
+        cout << "result bitmap (GE & LE) is : "; result_bitmap.print_range(0, inp.size());
+
+        vector<string> final_ids;
+        for (int j = 0; j < inp.size(); ++j) {
+            if (result_bitmap.get(j)) {
+                string id;
+                rocksdb::Status status = FAST_.Data.map3_sorted_index->Get(rocksdb::ReadOptions(), to_string(j), &id);
+                if (status.ok()) {
+                    final_ids.push_back(id);
+                }
+            }
+        }
+
+        cout << "Final IDs from sorted_index: ";
+        for (const auto& id : final_ids) {
+            cout << id << " ";
+        }
+        cout << endl;
         
         auto end_post = chrono::high_resolution_clock::now();
         chrono::duration<double> elapsed_post = end_post - start_post;

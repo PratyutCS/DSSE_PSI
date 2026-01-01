@@ -2,7 +2,7 @@
 
 # 1. Clean up existing RocksDB directories
 echo "Cleaning up database directories..."
-rm -rf Sigma_map1 Server_map2
+rm -rf Sigma_map1 Server_map2 Sorted_Index_map3
 
 # 2. Compile the project
 echo "Compiling queen.cpp..."
