@@ -30,21 +30,21 @@ int main(){
 
     DSSE FAST_;
 
-    cout << "============================= PSI: Setup =============================" << endl; 
+    cout << "============================= PI: Setup =============================" << endl; 
     auto start = chrono::high_resolution_clock::now();
     FAST_.Setup();
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed = end - start;
     cout << "Setup took: " << elapsed.count() << " seconds" << endl;
 
-    cout << "============================= PSI: Generate Random Input =============================" << endl; 
+    cout << "============================= PI: Generate Random Input =============================" << endl; 
     start = chrono::high_resolution_clock::now();
     vector<tuple<string, int>> inp = generate_random_input(10);
     end = chrono::high_resolution_clock::now();
     elapsed = end - start;
     cout << "Generate Random Input took: " << elapsed.count() << " seconds" << endl;
 
-    cout << "============================= PSI: DB Conversion =============================" << endl; 
+    cout << "============================= PI: DB Conversion =============================" << endl; 
     start = chrono::high_resolution_clock::now();
     auto res = DBConversion(inp, FAST_.Data.map3_sorted_index);
     end = chrono::high_resolution_clock::now();
@@ -56,7 +56,7 @@ int main(){
     //     cout<<i<<" - "<<get<0>(res[i])<<" : "<<get<1>(res[i])<<endl;
     // }
 
-    cout << "============================= PSI: Update Client =============================" << endl; 
+    cout << "============================= PI: Update Client =============================" << endl; 
     start = chrono::high_resolution_clock::now();
     vector<tuple<string, string>> u_List;
 
@@ -72,7 +72,7 @@ int main(){
     elapsed = end - start;
     cout << "Update Client takes: " << elapsed.count() << " seconds" << endl;
 
-    cout << "============================= PSI: Update Server =============================" << endl; 
+    cout << "============================= PI: Update Server =============================" << endl; 
     start = chrono::high_resolution_clock::now();
     for(auto utk : u_List)
     {
@@ -82,7 +82,7 @@ int main(){
     elapsed = end - start;
     cout << "Update Server takes: " << elapsed.count() << " seconds" << endl;
 
-    cout << "============================= PSI: Search LOOP =============================" << endl; 
+    cout << "============================= PI: Search LOOP =============================" << endl; 
     int choice = 1;
     while (choice != 0) {
         vector<string> search_result1;
@@ -111,7 +111,7 @@ int main(){
         elapsed_search = end_search - start_search;
         cout << "Search 2 took: " << elapsed_search.count() << " seconds" << endl;
 
-        cout<<"============================= PSI: Search ============================="<<endl;
+        cout<<"============================= PI: Search ============================="<<endl;
 
         //debug print
         for(int i=0 ; i<search_result1.size() ; i++){
@@ -122,7 +122,7 @@ int main(){
             cout<<i<<" - "<<param2<<" : "<<search_result2[i]<<endl;
         }
 
-        cout<<"============================= PSI: Post Processing ============================="<<endl;
+        cout<<"============================= PI: Post Processing ============================="<<endl;
         auto start_post = chrono::high_resolution_clock::now();
 
         string size_str;
