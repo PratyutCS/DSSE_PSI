@@ -24,6 +24,10 @@ vector<tuple<int, int>> esGen(vector<tuple<string, int>> &inp, rocksdb::DB* sort
     });
 
 
+    if(sorted_index_db) {
+        sorted_index_db->Put(rocksdb::WriteOptions(), "TOTAL_SIZE", to_string(inp.size()));
+    }
+
     // debug print
     for(int i=0 ; i<inp.size() ; i++)
     {

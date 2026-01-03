@@ -125,37 +125,41 @@ int main(){
         cout<<"============================= PSI: Post Processing ============================="<<endl;
         auto start_post = chrono::high_resolution_clock::now();
 
-        BitSequence<uint64_t> param1_L_bitmap = less_than(inp.size(), stoull(search_result1[1]));
-        BitSequence<uint64_t> param2_L_bitmap = less_than(inp.size(), stoull(search_result2[1]));
+        string size_str;
+        FAST_.Data.map3_sorted_index->Get(rocksdb::ReadOptions(), "TOTAL_SIZE", &size_str);
+        size_t total_size = stoull(size_str);
+
+        BitSequence<uint64_t> param1_L_bitmap = less_than(total_size, stoull(search_result1[1]));
+        BitSequence<uint64_t> param2_L_bitmap = less_than(total_size, stoull(search_result2[1]));
 
         // Final outputs
-        // cout << "lessthan 1: "; param1_L_bitmap.print_range(0, inp.size());
-        // cout << "lessthan 2: "; param2_L_bitmap.print_range(0, inp.size());
+        // cout << "lessthan 1: "; param1_L_bitmap.print_range(0, total_size);
+        // cout << "lessthan 2: "; param2_L_bitmap.print_range(0, total_size);
 
         // 1's Complement Demonstration
         BitSequence<uint64_t> param1_GE_bitmap = param1_L_bitmap.ones_complement();
-        // cout << "param1 complement: "; param1_GE_bitmap.print_range(0, inp.size());
+        // cout << "param1 complement: "; param1_GE_bitmap.print_range(0, total_size);
 
         // Initialize with all zeros (n, 0) to ensure it exists even if 'equal' is not applicable
-        BitSequence<uint64_t> param2_E_bitmap(inp.size(), 0); 
+        BitSequence<uint64_t> param2_E_bitmap(total_size, 0); 
         
         if(stoull(search_result2[0]) != -1)
         {
             // cout<<"equal to applicable for param2"<<endl;
-            param2_E_bitmap = equal_bits(stoull(search_result2[1]), stoull(search_result2[0]), inp.size());
-            // cout << "param2 equal bitmap is : "; param2_E_bitmap.print_range(0, inp.size());
+            param2_E_bitmap = equal_bits(stoull(search_result2[1]), stoull(search_result2[0]), total_size);
+            // cout << "param2 equal bitmap is : "; param2_E_bitmap.print_range(0, total_size);
         }
         
         // OR Operation: Combine LessThan and Equal to get LessThanEqual
         BitSequence<uint64_t> param2_LE_bitmap = param2_L_bitmap.bitwise_or(param2_E_bitmap);
-        // cout << "param2 LE (L | E) bitmap is : "; param2_LE_bitmap.print_range(0, inp.size());
+        // cout << "param2 LE (L | E) bitmap is : "; param2_LE_bitmap.print_range(0, total_size);
 
         // AND Operation: Intersect param1 GE and param2 LE
         BitSequence<uint64_t> result_bitmap = param1_GE_bitmap.bitwise_and(param2_LE_bitmap);
-        cout << "result bitmap (GE & LE) is : "; result_bitmap.print_range(0, inp.size());
+        cout << "result bitmap (GE & LE) is : "; result_bitmap.print_range(0, total_size);
 
         vector<string> final_ids;
-        for (int j = 0; j < inp.size(); ++j) {
+        for (size_t j = 0; j < total_size; ++j) {
             if (result_bitmap.get(j)) {
                 string id;
                 rocksdb::Status status = FAST_.Data.map3_sorted_index->Get(rocksdb::ReadOptions(), to_string(j), &id);
@@ -165,7 +169,7 @@ int main(){
             }
         }
 
-        cout << "Final IDs from sorted_index: ";
+        cout << "Final Matching IDs (from sorted_index DB): ";
         for (const auto& id : final_ids) {
             cout << id << " ";
         }
