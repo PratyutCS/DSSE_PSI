@@ -1,6 +1,6 @@
-# PSI using DSSE
+# PI using DSSE
 
-This project implements a PSI protocol built on top of **Dynamic Searchable Symmetric Encryption (DSSE)**. It allows for privacy-preserving range queries and set operations using bit sequences.
+This project implements a PI protocol built on top of **Dynamic Searchable Symmetric Encryption (DSSE)**. It allows for privacy-preserving range queries and set operations using bit sequences.
 
 ## 1. DSSE (Dynamic Searchable Symmetric Encryption)
 The core encryption layer uses the **FAST** scheme. DSSE allows a client to encrypt their data such that it remains searchable by a server without revealing the actual content or keywords to the server (unless a search token is provided).
@@ -33,10 +33,10 @@ The `result_bitmap` represents the indices where both conditions are met, effect
 
 ## 3. Storage & Utilities
 - **`BitSequence` Class**: A high-performance class in `BitSequence.cpp` that stores large numbers of bits in `uint64_t` blocks. It supports efficient bitwise NOT, OR, and AND.
-- **`run_psi.sh`**: A shell script to clean up databases, compile with `g++`, and run the `queen` binary.
+- **`run_pi.sh`**: A shell script to clean up databases, compile with `g++`, and run the `queen` binary.
 
 ## 4. How to Run
 ```bash
-bash run_psi.sh
+bash run_pi.sh
 ```
 Follow the prompts to enter search parameters. Enter `0` when asked if you want to continue to exit the loop.
