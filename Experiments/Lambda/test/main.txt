@@ -1,0 +1,18 @@
+DSSE FAST: Begins 
+============================= PSI: Setup =============================
+ FAST: Setup Ends Here;
+0x63b2d425d100
+Lambda(FAST): The EDB is : 
+0x63b2d42d3ec0
+Lambda: Setup Protocol Ends Here.
+FASTIO: Enter Choice (Update/Search) : (1/2)
+============================= PSI: Update =============================
+Average client-side update time (μs): 0.1
+Average server-side update time (μs): 0
+Do you want to continue? (y/n): FASTIO: Enter Choice (Update/Search) : (1/2)
+Enter the range query of the form [int a, int b]: a  = 
+Enter the range query of the form [int a, int b]: b  = 
+============================= PSI: Search =============================
+Client: Search Time = 50 μs
+Server: Search Time = 50 μs
+Do you want to continue? (y/n): DSSE FAST: Ends 

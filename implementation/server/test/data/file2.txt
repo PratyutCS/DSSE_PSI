@@ -1,0 +1,2 @@
+This is content for file 2.
+Testing verification scripts is fun.

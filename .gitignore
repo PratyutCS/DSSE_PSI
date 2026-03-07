@@ -1,0 +1,35 @@
+# C/C++ builds/large binaries
+*.a
+*.so
+*.o
+*.obj
+*.exe
+*.dll
+*.dylib
+*.pdb
+
+# Android/Java
+*.apk
+*.aar
+*.dex
+*.class
+bin/
+gen/
+out/
+build/
+.gradle/
+.idea/
+local.properties
+*.iml
+
+# Node / JS
+node_modules/
+
+# Logs and DB
+*.log
+*.db
+*.sqlite
+
+# Large generated sources / folders
+implementation/rocksdb_source/
+implementation/build-cryptopp/

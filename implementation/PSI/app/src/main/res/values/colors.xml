@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Neon Dark Theme - PSI -->
+    <color name="neon_dark_bg">#050505</color>
+    <color name="neon_dark_surface">#121212</color>
+    <color name="neon_cyan">#00FFFF</color>
+    <color name="neon_cyan_dim">#00CCCC</color>
+    <color name="neon_violet">#BC13FE</color>
+    <color name="neon_violet_dim">#9B00D0</color>
+    <color name="neon_blue">#007FFF</color>
+    
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+    
+    <!-- Compatibility for missing resources -->
+    <color name="text_light">#F8FAFC</color>
+    <color name="text_dim">#94A3B8</color>
+    
+    <!-- Mapping for existing themes if they use these names -->
+    <color name="midnight_primary">#050505</color>
+    <color name="luxury_gold">#00FFFF</color>
+    <color name="luxury_gold_dark">#00CCCC</color>
+</resources>

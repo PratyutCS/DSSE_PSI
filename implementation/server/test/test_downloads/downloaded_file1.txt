@@ -1,0 +1,2 @@
+This is content for file 1.
+RocksDB + Node.js = Power.

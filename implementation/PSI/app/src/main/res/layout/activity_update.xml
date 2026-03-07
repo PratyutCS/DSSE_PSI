@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_gradient_main">
+
+    <include layout="@layout/toolbar_luxury"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:gravity="center_horizontal">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Select Uninitialized Space"
+            android:textColor="@color/text_dim"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="true"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp"/>
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:background="@drawable/bg_input_field"
+            android:padding="4dp"
+            android:layout_marginBottom="16dp">
+
+            <Spinner
+                android:id="@+id/spinnerSpaces"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@null"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:spinnerMode="dropdown" />
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:layout_marginEnd="12dp"
+                android:src="@android:drawable/arrow_down_float"
+                android:contentDescription="Dropdown Arrow" />
+        </RelativeLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Select Files (.txt)"
+                android:textColor="@color/text_dim"
+                android:textSize="14sp"
+                android:fontFamily="sans-serif-medium"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1"/>
+
+            <Button
+                android:id="@+id/btnAddFile"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:text="+ ADD FILE"
+                android:background="@drawable/bg_button_gold"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-black"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"/>
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvFiles"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginBottom="16dp"
+            android:clipToPadding="false"/>
+
+        <TextView
+            android:id="@+id/tvEmptyMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="No uninitialized spaces found."
+            android:textColor="#FF4444"
+            android:gravity="center"
+            android:visibility="gone"
+            android:layout_marginBottom="16dp"/>
+
+        <Button
+            android:id="@+id/btnPerformUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="PERFORM UPDATE"
+            android:background="@drawable/bg_button_gold"
+            android:textColor="@android:color/white"
+            android:fontFamily="sans-serif-black"
+            android:textSize="14sp"
+            android:letterSpacing="0.1"
+            android:elevation="4dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Note: Only databases with no uploaded files will be shown here for update."
+            android:textColor="@color/text_dim"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:layout_marginTop="24dp"/>
+
+    </LinearLayout>
+
+</LinearLayout>

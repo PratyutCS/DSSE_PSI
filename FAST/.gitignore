@@ -1,0 +1,10 @@
+*
+
+!*.cpp
+!*.h
+
+!./test/*.cpp
+!./test/*.sh
+
+!*.gitignore
+

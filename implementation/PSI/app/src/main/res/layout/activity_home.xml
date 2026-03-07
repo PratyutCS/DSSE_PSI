@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_gradient_main">
+
+    <include layout="@layout/toolbar_luxury"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp">
+
+        <GridLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:columnCount="2"
+            android:alignmentMode="alignMargins"
+            android:columnOrderPreserved="false"
+            android:useDefaultMargins="true">
+
+            <!-- Create Button -->
+            <LinearLayout
+                android:id="@+id/btnCreateSpace"
+                android:layout_width="140dp"
+                android:layout_height="140dp"
+                android:background="@drawable/bg_card_luxury"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_margin="8dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_add_gold"
+                    android:layout_marginBottom="12dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="CREATE"
+                    android:textColor="@color/text_light"
+                    android:textSize="14sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+            <!-- Search Button -->
+            <LinearLayout
+                android:id="@+id/btnSearchSpace"
+                android:layout_width="140dp"
+                android:layout_height="140dp"
+                android:background="@drawable/bg_card_luxury"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_margin="8dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_search_gold"
+                    android:layout_marginBottom="12dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SEARCH"
+                    android:textColor="@color/text_light"
+                    android:textSize="14sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+            <!-- Update Button -->
+            <LinearLayout
+                android:id="@+id/btnUpdateSpace"
+                android:layout_width="140dp"
+                android:layout_height="140dp"
+                android:background="@drawable/bg_card_luxury"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_margin="8dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_update_gold"
+                    android:layout_marginBottom="12dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="UPDATE"
+                    android:textColor="@color/text_light"
+                    android:textSize="14sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+            <!-- Delete Button -->
+            <LinearLayout
+                android:id="@+id/btnDeleteSpace"
+                android:layout_width="140dp"
+                android:layout_height="140dp"
+                android:background="@drawable/bg_card_luxury"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_margin="8dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_delete_gold"
+                    android:layout_marginBottom="12dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DELETE"
+                    android:textColor="@color/text_light"
+                    android:textSize="14sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+        </GridLayout>
+
+        <Button
+            android:id="@+id/btnLogout"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="20dp"
+            android:text="Logout"
+            android:textColor="@color/white"
+            android:background="@drawable/bg_button_neon_violet"
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            app:backgroundTint="@null"
+            android:layout_marginTop="48dp"
+            android:textAllCaps="true"
+            android:textStyle="bold"/>
+
+    </LinearLayout>
+
+</LinearLayout>

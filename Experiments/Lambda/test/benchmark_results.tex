@@ -1,0 +1,52 @@
+\documentclass[a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+
+\geometry{margin=1in}
+
+\definecolor{rowgray}{gray}{0.92}
+
+\begin{document}
+
+\begin{table}[htbp]
+\centering
+\renewcommand{\arraystretch}{1.25}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{ccccccc}
+\toprule
+\textbf{Size\_ID} &
+\textbf{Setup ($\mu$s)} &
+\textbf{Avg Update Server ($\mu$s)} &
+\textbf{Avg Update Client ($\mu$s)} &
+\textbf{Avg Search Client ($\mu$s)} &
+\textbf{Avg Search Server ($\mu$s)} &
+\textbf{Post Processing ($\mu$s)} \\
+\midrule
+10 & 56638.00 & 16.10 & 82.80 & 8.00 & 23.00 & 1.00 \\
+\rowcolor{rowgray}
+25 & 61208.00 & 28.92 & 116.48 & 5.00 & 48.00 & 1.00 \\
+50 & 62245.00 & 86.82 & 375.58 & 15.00 & 145.00 & 3.00 \\
+\rowcolor{rowgray}
+75 & 56874.00 & 124.63 & 499.75 & 6.00 & 156.00 & 2.00 \\
+100 & 59069.00 & 104.90 & 386.40 & 8.00 & 206.00 & 3.00 \\
+\rowcolor{rowgray}
+250 & 58557.00 & 294.54 & 1057.73 & 10.00 & 660.00 & 7.00 \\
+500 & 58414.00 & 717.65 & 2176.69 & 9.00 & 1400.00 & 12.00 \\
+\rowcolor{rowgray}
+750 & 56199.00 & 1151.73 & 3222.39 & 11.00 & 2362.00 & 15.00 \\
+1000 & 58203.00 & 1755.19 & 4231.52 & 9.00 & 3383.00 & 19.00 \\
+\rowcolor{rowgray}
+2500 & 60024.00 & 4292.01 & 11229.41 & 38.00 & 12777.00 & 47.00 \\
+5000 & 57620.00 & 8394.12 & 22743.02 & 10.00 & 48293.00 & 92.00 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\end{document}

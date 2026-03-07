@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.PSI" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/neon_cyan</item>
+        <item name="colorPrimaryVariant">@color/neon_cyan_dim</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/neon_violet</item>
+        <item name="colorSecondaryVariant">@color/neon_violet_dim</item>
+        <item name="colorOnSecondary">@color/white</item>
+        
+        <item name="android:windowBackground">@color/neon_dark_bg</item>
+        <item name="android:statusBarColor">@color/neon_dark_bg</item>
+        
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+</resources>
