@@ -57,7 +57,8 @@ public class UpdateActivity extends AppCompatActivity {
     private LinearLayout layoutAddFile, layoutDeleteSignal;
     private EditText etTargetId, etTargetKeywords;
     private RecyclerView rvFiles;
-    private TextView tvEmptyMessage;
+    private TextView tvEmptyMessage, tvProgress;
+    private android.widget.ProgressBar progressBar;
 
     private FileAdapter fileAdapter;
     private final List<FileItem> selectedFiles = new ArrayList<>();
@@ -79,6 +80,8 @@ public class UpdateActivity extends AppCompatActivity {
         etTargetKeywords    = findViewById(R.id.etTargetKeywords);
         rvFiles             = findViewById(R.id.rvFiles);
         tvEmptyMessage      = findViewById(R.id.tvEmptyMessage);
+        tvProgress          = findViewById(R.id.tvProgress);
+        progressBar         = findViewById(R.id.progressBar);
 
         TextView toolbarTitle = findViewById(R.id.toolbarTitle);
         toolbarTitle.setText("UPDATE PSI");
@@ -155,7 +158,10 @@ public class UpdateActivity extends AppCompatActivity {
         String baseUrl = "http://" + ip + ":3000/api";
 
         setUIEnabled(false);
-        Toast.makeText(this, isAddMode ? "Generating add tokens…" : "Generating delete tokens…", Toast.LENGTH_SHORT).show();
+        tvProgress.setVisibility(View.VISIBLE);
+        progressBar.setVisibility(View.VISIBLE);
+        progressBar.setProgress(0);
+        tvProgress.setText("Initializing Cryptography...");
 
         new Thread(() -> {
             try {
@@ -165,6 +171,7 @@ public class UpdateActivity extends AppCompatActivity {
 
                 if (isAddMode) {
                     // ---- ADD mode ----
+                    runOnUiThread(() -> tvProgress.setText("Generating Secure Tokens (0%)"));
                     String[] paths = new String[selectedFiles.size()];
                     int[] kws      = new int[selectedFiles.size()];
                     for (int i = 0; i < selectedFiles.size(); i++) {
@@ -188,7 +195,18 @@ public class UpdateActivity extends AppCompatActivity {
                     if (sepIdx < 0) throw new Exception("Separator not found in JNI result");
 
                     int batchSize = 10000;
+                    int totalBatches = (int) Math.ceil((double) sepIdx / (batchSize * 2));
+                    int currentBatch = 0;
+
                     for (int i = 0; i < sepIdx; i += batchSize * 2) {
+                        currentBatch++;
+                        int finalCurrentBatch = currentBatch;
+                        runOnUiThread(() -> {
+                            int pct = (int) (((double) finalCurrentBatch / totalBatches) * 50); // Scale to 50%
+                            progressBar.setProgress(pct);
+                            tvProgress.setText(String.format("Uploading Secure Indexes (%d/%d)...", finalCurrentBatch, totalBatches));
+                        });
+
                         JSONArray pairs = new JSONArray();
                         int end = Math.min(i + batchSize * 2, sepIdx);
                         for (int j = i; j < end; j += 2) {
@@ -203,6 +221,11 @@ public class UpdateActivity extends AppCompatActivity {
                         NetworkUtils.performPostRequest(baseUrl + "/bulk-save-index_value", body.toString(), token);
                     }
 
+                    runOnUiThread(() -> {
+                        tvProgress.setText("Encrypting and Uploading Files...");
+                        progressBar.setProgress(75);
+                    });
+
                     List<String> encPaths = new ArrayList<>();
                     for (int i = sepIdx + 1; i < jniResult.length; i++)
                         encPaths.add(jniResult[i]);
@@ -214,6 +237,8 @@ public class UpdateActivity extends AppCompatActivity {
 
                 } else {
                     // ---- DELETE mode ----
+                    runOnUiThread(() -> tvProgress.setText("Generating Secure Delete Signal..."));
+                    
                     String targetId  = etTargetId.getText().toString().trim();
                     int    targetKw  = Integer.parseInt(etTargetKeywords.getText().toString().trim());
 
@@ -222,7 +247,18 @@ public class UpdateActivity extends AppCompatActivity {
                     if (jniResult == null) throw new Exception("Native delete token generation returned null");
 
                     int batchSize = 10000;
+                    int totalBatches = (int) Math.ceil((double) jniResult.length / (batchSize * 2));
+                    int currentBatch = 0;
+
                     for (int i = 0; i < jniResult.length; i += batchSize * 2) {
+                        currentBatch++;
+                        int finalCurrentBatch = currentBatch;
+                        runOnUiThread(() -> {
+                            int pct = (int) (((double) finalCurrentBatch / totalBatches) * 100); 
+                            progressBar.setProgress(pct);
+                            tvProgress.setText(String.format("Propagating Delete Signal (%d/%d)...", finalCurrentBatch, totalBatches));
+                        });
+
                         JSONArray pairs = new JSONArray();
                         int end = Math.min(i + batchSize * 2, jniResult.length);
                         for (int j = i; j < end; j += 2) {
@@ -239,6 +275,8 @@ public class UpdateActivity extends AppCompatActivity {
                 }
 
                 runOnUiThread(() -> {
+                    progressBar.setProgress(100);
+                    tvProgress.setText("Update Complete!");
                     setUIEnabled(true);
                     Toast.makeText(this, "Update successful!", Toast.LENGTH_LONG).show();
                     fileAdapter.notifyDataSetChanged();
@@ -249,6 +287,8 @@ public class UpdateActivity extends AppCompatActivity {
                 Log.e(TAG, "Update failed", e);
                 runOnUiThread(() -> {
                     setUIEnabled(true);
+                    tvProgress.setText("Update Failed");
+                    progressBar.setProgress(0);
                     Toast.makeText(this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 });
             }
@@ -257,10 +297,13 @@ public class UpdateActivity extends AppCompatActivity {
 
     private void setUIEnabled(boolean enabled) {
         btnPerformUpdate.setEnabled(enabled);
+        btnPerformUpdate.setAlpha(enabled ? 1.0f : 0.5f);
         btnAddFile.setEnabled(enabled);
         spinnerSpaces.setEnabled(enabled);
         btnModeAdd.setEnabled(enabled);
         btnModeDelete.setEnabled(enabled);
+        etTargetId.setEnabled(enabled);
+        etTargetKeywords.setEnabled(enabled);
     }
 
     private void fetchAllSpaces() {
