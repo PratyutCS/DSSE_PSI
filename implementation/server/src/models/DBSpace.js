@@ -14,6 +14,10 @@ const dbSpaceSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    fileCount: {
+        type: Number,
+        default: 0
+    }
 }, { timestamps: true });
 
 // Compound index to ensure unique dbName per user

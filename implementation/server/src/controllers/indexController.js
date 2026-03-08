@@ -7,7 +7,7 @@ const path = require('path');
 const getDbPath = async (user, dbName) => {
     const space = await DBSpace.findOne({ owner: user._id, dbName: dbName });
     if (!space) throw new Error('Database Space not found');
-    return space.path;
+    return path.join(space.path, 'index');
 }
 
 const getIndexValue = async (req, res) => {

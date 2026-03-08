@@ -33,7 +33,9 @@ const createSpace = async (req, res) => {
             // return res.status(400).json({ message: 'Directory already exists for this space' });
         }
 
-        fs.mkdirSync(spacePath, { recursive: true });
+        // Create Isolated Directories
+        fs.mkdirSync(path.join(spacePath, 'index'), { recursive: true });
+        fs.mkdirSync(path.join(spacePath, 'files'), { recursive: true });
 
         // Save metadata
         const space = await DBSpace.create({
@@ -92,18 +94,6 @@ const getSpaces = async (req, res) => {
     try {
         const spaces = await DBSpace.find({ owner: user._id });
 
-        // If uninitialized filter is requested
-        if (uninitialized === 'true') {
-            const filteredSpaces = spaces.filter(space => {
-                if (fs.existsSync(space.path)) {
-                    const files = fs.readdirSync(space.path);
-                    return files.length === 0;
-                }
-                return true; // If directory doesn't exist yet, it's definitely uninitialized
-            });
-            return res.json({ spaces: filteredSpaces.map(s => s.dbName) });
-        }
-
         const spaceNames = spaces.map(s => s.dbName);
         res.json({ spaces: spaceNames });
     } catch (error) {
@@ -112,4 +102,24 @@ const getSpaces = async (req, res) => {
     }
 };
 
-module.exports = { createSpace, deleteSpace, getSpaces };
+const getSpaceInfo = async (req, res) => {
+    const user = req.user;
+    const { dbName } = req.query;
+
+    if (!dbName) return res.status(400).json({ message: 'dbName required' });
+
+    try {
+        const space = await DBSpace.findOne({ owner: user._id, dbName: dbName });
+        if (!space) return res.status(404).json({ message: 'Space not found' });
+
+        res.json({
+            dbName: space.dbName,
+            fileCount: space.fileCount || 0
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Error fetching space info' });
+    }
+};
+
+module.exports = { createSpace, deleteSpace, getSpaces, getSpaceInfo };

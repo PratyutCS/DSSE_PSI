@@ -31,7 +31,7 @@ const storage = multer.diskStorage({
             if (!space) {
                 return cb(new Error('Space not found or access denied'), null);
             }
-            cb(null, space.path);
+            cb(null, path.join(space.path, 'files'));
         } catch (e) {
             cb(e, null);
         }
@@ -44,15 +44,27 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-const uploadFiles = (req, res) => {
+const uploadFiles = async (req, res) => {
     if (!req.file && !req.files) {
         return res.status(400).json({ message: 'No files uploaded' });
     }
-    // Metadata about uploaded file
-    res.json({
-        message: 'File uploaded successfully',
-        file: req.file,
-    });
+
+    const { dbName } = req.query;
+    const user = req.user;
+    const numFiles = req.files ? req.files.length : (req.file ? 1 : 0);
+
+    try {
+        await DBSpace.findOneAndUpdate(
+            { owner: user._id, dbName: dbName },
+            { $inc: { fileCount: numFiles } }
+        );
+        res.json({
+            message: 'File uploaded successfully',
+            count: numFiles
+        });
+    } catch (e) {
+        res.status(500).json({ message: 'Error updating file count' });
+    }
 };
 
 const getFiles = async (req, res) => {
@@ -69,7 +81,8 @@ const getFiles = async (req, res) => {
             return res.status(404).json({ message: 'Space not found' });
         }
 
-        const files = fs.readdirSync(space.path);
+        const filesPath = path.join(space.path, 'files');
+        const files = fs.readdirSync(filesPath);
         // Simple list
         res.json({
             dbName,
@@ -95,19 +108,20 @@ const downloadFile = async (req, res) => {
             return res.status(404).json({ message: 'Space not found' });
         }
 
-        const files = fs.readdirSync(space.path);
+        const filesPath = path.join(space.path, 'files');
+        const files = fs.readdirSync(filesPath);
         // Find a file that matches fileId exactly OR matches fileId + extension
         const actualFileName = files.find(f => f.startsWith(fileId + ".") || f === fileId);
 
         if (!actualFileName) {
-            console.log(`[File] Not found matching: ${fileId} in ${space.path}`);
+            console.log(`[File] Not found matching: ${fileId} in ${filesPath}`);
             return res.status(404).json({ message: 'File not found' });
         }
 
-        const filePath = path.join(space.path, actualFileName);
+        const filePath = path.join(filesPath, actualFileName);
 
-        // Security check: ensure filePath is within space.path
-        if (!filePath.startsWith(space.path)) {
+        // Security check: ensure filePath is within filesPath
+        if (!filePath.startsWith(filesPath)) {
             return res.status(403).json({ message: 'Access denied' });
         }
 

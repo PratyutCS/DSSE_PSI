@@ -6,13 +6,10 @@ import android.util.Log;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.os.Environment;
@@ -35,24 +32,29 @@ import java.util.concurrent.Executors;
 
 public class SearchActivity extends AppCompatActivity {
 
-    static {
-        System.loadLibrary("psi");
-    }
+    static { System.loadLibrary("psi"); }
 
-    private native String[] getSearchToken(String storagePath, String keyword);
-    private native int[] performPostProcessing(String storagePath, int indexRange, String res1_0, String res1_1, String res2_0, String res2_1);
-    private native boolean decryptResultFile(String storagePath, String encryptedPath, String decryptedPath);
+    // JNI: returns 12 strings [stk1_l(kw,st,c), stk1_e(kw,st,c), stk2_l(kw,st,c), stk2_e(kw,st,c)]
+    private native String[] getSearchTokens(String storagePath, byte[] key, int a, int b, int kwSpaceSize);
+    // JNI: bitmap post-processing
+    private native int[] performPostProcessing(int numIDs, int kwSpaceSize,
+                                                String[] r1l, String[] r1e, String[] r2l, String[] r2e,
+                                                int a, int b);
+    // JNI: decrypt a downloaded file
+    private native boolean decryptResultFile(String storagePath, byte[] key, String encryptedPath, String decryptedPath);
 
     private AutoCompleteTextView actvSpaceSelector;
     private android.widget.EditText etParam1, etParam2;
     private Button btnConnect;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
-    
+
     private TextView tvResultsTitle, tvResults;
     private View svResults;
 
+    private static final String TAG = "PSI_SEARCH";
     private static final String PREFS_NAME = "psi_prefs";
+    private static final int KW_SPACE_SIZE = 100000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,14 +65,14 @@ public class SearchActivity extends AppCompatActivity {
         etParam1 = findViewById(R.id.etParam1);
         etParam2 = findViewById(R.id.etParam2);
         btnConnect = findViewById(R.id.btnConnect);
-        
+
         TextView toolbarTitle = findViewById(R.id.toolbarTitle);
         toolbarTitle.setText("PRIVATE SEARCH");
 
         tvResultsTitle = findViewById(R.id.tvResultsTitle);
-        tvResults = findViewById(R.id.tvResults);
-        svResults = findViewById(R.id.svResults);
-        
+        tvResults      = findViewById(R.id.tvResults);
+        svResults      = findViewById(R.id.svResults);
+
         View btnBack = findViewById(R.id.btnBack);
         btnBack.setVisibility(View.VISIBLE);
         btnBack.setOnClickListener(v -> finish());
@@ -79,144 +81,127 @@ public class SearchActivity extends AppCompatActivity {
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String token = prefs.getString("auth_token", null);
-
-        if (token != null) {
-            fetchSpaces(token);
-        } else {
-            finish();
-        }
+        if (token != null) fetchSpaces(token);
+        else finish();
     }
 
     private void performSearch() {
-        String dbName = actvSpaceSelector.getText().toString();
-        String p1 = etParam1.getText().toString();
-        String p2 = etParam2.getText().toString();
+        String dbName = actvSpaceSelector.getText().toString().trim();
+        String p1 = etParam1.getText().toString().trim();
+        String p2 = etParam2.getText().toString().trim();
 
         if (dbName.isEmpty() || dbName.equals("Select Space")) {
             Toast.makeText(this, "Please select a space", Toast.LENGTH_SHORT).show();
             return;
         }
         if (p1.isEmpty() || p2.isEmpty()) {
-            Toast.makeText(this, "Please enter both search parameters", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Please enter both range parameters", Toast.LENGTH_SHORT).show();
             return;
         }
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String token = prefs.getString("auth_token", null);
-        String ip = prefs.getString("last_ip", BuildConfig.SERVER_IP);
-        String baseUrl = "http://" + ip + ":3000/api/get-index_value";
+        String token  = prefs.getString("auth_token", null);
+        String ip     = prefs.getString("last_ip", BuildConfig.SERVER_IP);
+        String searchUrl = "http://" + ip + ":3000/api/get-index_value";
 
-        Toast.makeText(this, "Searching...", Toast.LENGTH_SHORT).show();
-
-        // 0. Check for MANAGE_EXTERNAL_STORAGE permission on Android 11+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.setData(Uri.parse("package:" + getPackageName()));
-                startActivity(intent);
-                Toast.makeText(this, "Please grant 'All Files Access' to save results to SD card", Toast.LENGTH_LONG).show();
-                return;
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getPackageName())));
+            Toast.makeText(this, "Grant 'All Files Access' first", Toast.LENGTH_LONG).show();
+            return;
         }
+
+        Toast.makeText(this, "Searching…", Toast.LENGTH_SHORT).show();
 
         executor.execute(() -> {
             try {
-                String storagePath = getDbStoragePath(dbName);
-                
-                // 0. Cleanup previous searches
-                File publicDecryptedDir = new File(Environment.getExternalStorageDirectory(), "PSI_SearchResults");
-                clearDirectories(new File(getFilesDir(), "downloads"), publicDecryptedDir);
-                
-                // 1. Get tokens for param 1
-                Log.i("PSI_SEARCH", "Generating token for P1: " + p1);
-                String[] tokens1 = getSearchToken(storagePath, p1);
-                Log.i("PSI_SEARCH", "P1 Tokens: u=" + tokens1[0] + ", count=" + tokens1[2]);
-                
-                String url1 = baseUrl + "?dbName=" + dbName + "&keyword_token=" + Uri.encode(tokens1[0]) + "&state_token=" + Uri.encode(tokens1[1]) + "&count=" + tokens1[2];
-                Log.i("PSI_SEARCH", "Requesting P1 from server: " + url1);
-                String response1 = NetworkUtils.performGetRequest(url1, token);
-                JSONArray res1 = new JSONObject(response1).getJSONArray("results");
-                Log.i("PSI_SEARCH", "P1 Results received: " + res1.length());
-
-                // 2. Get tokens for param 2
-                Log.i("PSI_SEARCH", "Generating token for P2: " + p2);
-                String[] tokens2 = getSearchToken(storagePath, p2);
-                Log.i("PSI_SEARCH", "P2 Tokens: u=" + tokens2[0] + ", count=" + tokens2[2]);
-                
-                String url2 = baseUrl + "?dbName=" + dbName + "&keyword_token=" + Uri.encode(tokens2[0]) + "&state_token=" + Uri.encode(tokens2[1]) + "&count=" + tokens2[2];
-                Log.i("PSI_SEARCH", "Requesting P2 from server: " + url2);
-                String response2 = NetworkUtils.performGetRequest(url2, token);
-                JSONArray res2 = new JSONObject(response2).getJSONArray("results");
-                Log.i("PSI_SEARCH", "P2 Results received: " + res2.length());
-
-                // 3. Post Process
-                // resX is a list of results. In the benchmark queen.cpp, search_result1[1] and [0] were used.
-                // Assuming res1 has at least 2 elements [equal_id, boundary_val]
-                String r10 = res1.length() > 0 ? res1.getString(0) : "-1";
-                String r11 = res1.length() > 1 ? res1.getString(1) : "-1";
-                String r20 = res2.length() > 0 ? res2.getString(0) : "-1";
-                String r21 = res2.length() > 1 ? res2.getString(1) : "-1";
-
-                int[] ids = performPostProcessing(storagePath, 100000, r10, r11, r20, r21);
-
-                // 4. Download and Decrypt matched files
-                File internalBase = getFilesDir();
-                File downloadDir = new File(internalBase, "downloads");
+                File downloadDir  = new File(getFilesDir(), "downloads");
                 File decryptedDir = new File(Environment.getExternalStorageDirectory(), "PSI_SearchResults");
-                
+                clearDirectories(downloadDir, decryptedDir);
+
+                String storagePath = getDbStoragePath(dbName);
+                byte[] spaceKey = CryptoUtils.getSpaceKey(this, dbName);
+                int a = Integer.parseInt(p1);
+                int b = Integer.parseInt(p2);
+
+                Log.i(TAG, "Generating search tokens for [" + a + ", " + b + "]");
+                String[] tokens = getSearchTokens(storagePath, spaceKey, a, b, KW_SPACE_SIZE);
+                if (tokens == null || tokens.length < 12)
+                    throw new Exception("getSearchTokens returned invalid data");
+
+                String[][] serverResults = new String[4][];
+                for (int i = 0; i < 4; i++) {
+                    int off = i * 3;
+                    String countStr = tokens[off + 2];
+                    if ("0".equals(countStr)) {
+                        serverResults[i] = new String[0];
+                        continue;
+                    }
+                    String url = searchUrl
+                            + "?dbName="        + Uri.encode(dbName)
+                            + "&keyword_token=" + Uri.encode(tokens[off])
+                            + "&state_token="   + Uri.encode(tokens[off + 1])
+                            + "&count="         + countStr;
+                    try {
+                        String resp = NetworkUtils.performGetRequest(url, token);
+                        JSONArray arr = new JSONObject(resp).getJSONArray("results");
+                        serverResults[i] = new String[arr.length()];
+                        for (int j = 0; j < arr.length(); j++)
+                            serverResults[i][j] = arr.getString(j);
+                    } catch (Exception e) {
+                        serverResults[i] = new String[0];
+                    }
+                }
+
+                // Fetch current fileCount for bitmap dimensioning
+                String infoUrl = "http://" + ip + ":3000/api/get-space-info?dbName=" + Uri.encode(dbName);
+                String infoResp = NetworkUtils.performGetRequest(infoUrl, token);
+                int numIDs = new JSONObject(infoResp).getInt("fileCount");
+
+                int[] matchedIds = performPostProcessing(numIDs, KW_SPACE_SIZE,
+                        serverResults[0], serverResults[1],
+                        serverResults[2], serverResults[3],
+                        a, b);
+
                 if (!downloadDir.exists()) downloadDir.mkdirs();
                 if (!decryptedDir.exists()) decryptedDir.mkdirs();
 
-                for (int id : ids) {
+                for (int id : matchedIds) {
                     String fileId = "ID" + id;
-                    String downloadUrl = "http://" + ip + ":3000/api/download-file?dbName=" + dbName + "&fileId=" + fileId;
-                    
-                    Log.i("PSI_SEARCH", "Downloading " + fileId);
-                    // downloadFile now returns the actual filename from the server (e.g. ID0.pdf)
-                    String downloadedFileName = NetworkUtils.downloadFile(downloadUrl, downloadDir.getAbsolutePath(), token);
-                    
-                    File encFile = new File(downloadDir, downloadedFileName);
-                    File decFile = new File(decryptedDir, downloadedFileName.replace(fileId, fileId + "_decrypted"));
+                    String dlUrl = "http://" + ip + ":3000/api/download-file?dbName=" + dbName + "&fileId=" + fileId;
+                    try {
+                        String dlName = NetworkUtils.downloadFile(dlUrl, downloadDir.getAbsolutePath(), token);
+                        File encFile = new File(downloadDir, dlName);
+                        File decFile = new File(decryptedDir, dlName.replace(fileId, fileId + "_decrypted"));
 
-                    Log.i("PSI_SEARCH", "Decrypting " + downloadedFileName);
-                    boolean success = decryptResultFile(storagePath, encFile.getAbsolutePath(), decFile.getAbsolutePath());
-                    if (success) {
-                        Log.i("PSI_SEARCH", "Successfully decrypted " + downloadedFileName + " to " + decFile.getAbsolutePath());
-                    } else {
-                        Log.e("PSI_SEARCH", "Failed to decrypt " + downloadedFileName);
+                        decryptResultFile(storagePath, spaceKey, encFile.getAbsolutePath(), decFile.getAbsolutePath());
+                    } catch (Exception e) {
+                        Log.e(TAG, "Download/decrypt error for " + fileId, e);
                     }
                 }
 
                 handler.post(() -> {
-                    if (ids.length == 0) {
-                        Toast.makeText(this, "No matching records found.", Toast.LENGTH_LONG).show();
+                    if (matchedIds.length == 0) {
+                        Toast.makeText(this, "No matching records", Toast.LENGTH_LONG).show();
                         tvResultsTitle.setVisibility(View.GONE);
                         svResults.setVisibility(View.GONE);
                     } else {
-                        Toast.makeText(this, "Found " + ids.length + " matching IDs! Files saved in: " + decryptedDir.getAbsolutePath(), Toast.LENGTH_LONG).show();
-                        
                         StringBuilder sb = new StringBuilder();
                         sb.append("Files recovered to: ").append(decryptedDir.getAbsolutePath()).append("\n\n");
-                        for (int i = 0; i < ids.length; i++) {
-                            sb.append("ID").append(ids[i]);
-                            if (i < ids.length - 1) {
-                                sb.append(", ");
-                            }
-                            if ((i + 1) % 5 == 0) {
-                                sb.append("\n");
-                            }
+                        for (int i = 0; i < matchedIds.length; i++) {
+                            sb.append("ID").append(matchedIds[i]);
+                            if (i < matchedIds.length - 1) sb.append(", ");
+                            if ((i + 1) % 5 == 0) sb.append("\n");
                         }
-                        
                         tvResults.setText(sb.toString());
                         tvResultsTitle.setVisibility(View.VISIBLE);
                         svResults.setVisibility(View.VISIBLE);
-                        
-                        Log.i("PSI_SEARCH", "Matched IDs: " + sb.toString());
+                        Toast.makeText(this, "Found " + matchedIds.length + " match(es)!", Toast.LENGTH_LONG).show();
                     }
                 });
 
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e(TAG, "Search failed", e);
                 handler.post(() -> Toast.makeText(this, "Search failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
         });
@@ -226,61 +211,48 @@ public class SearchActivity extends AppCompatActivity {
         for (File dir : dirs) {
             if (dir != null && dir.exists() && dir.isDirectory()) {
                 File[] files = dir.listFiles();
-                if (files != null) {
-                    for (File f : files) f.delete();
-                }
+                if (files != null) for (File f : files) f.delete();
             }
         }
     }
 
     private void fetchSpaces(String token) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String ip = prefs.getString("last_ip", BuildConfig.SERVER_IP);
+        String ip  = prefs.getString("last_ip", BuildConfig.SERVER_IP);
         String url = "http://" + ip + ":3000/api/get-spaces";
 
         executor.execute(() -> {
             try {
-                String response = NetworkUtils.performGetRequest(url, token);
-                JSONObject jsonResponse = new JSONObject(response);
-                JSONArray spaces = jsonResponse.optJSONArray("spaces");
+                String resp = NetworkUtils.performGetRequest(url, token);
+                JSONArray spaces = new JSONObject(resp).optJSONArray("spaces");
                 handler.post(() -> updateSpaceList(spaces));
             } catch (Exception e) {
-                e.printStackTrace();
-                handler.post(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                Log.e(TAG, "fetchSpaces error", e);
             }
         });
     }
 
     private void updateSpaceList(JSONArray spaces) {
         if (spaces == null || spaces.length() == 0) {
-            actvSpaceSelector.setText("No secure spaces found.", false);
+            actvSpaceSelector.setText("No spaces found.", false);
             return;
         }
-
-        List<String> spaceNames = new ArrayList<>();
+        List<String> names = new ArrayList<>();
         try {
-            for (int i = 0; i < spaces.length(); i++) {
-                spaceNames.add(spaces.getString(i));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+            for (int i = 0; i < spaces.length(); i++) names.add(spaces.getString(i));
+        } catch (Exception ignored) {}
 
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
-                this,
-                R.layout.item_dropdown_luxury,
-                spaceNames
-        );
-        actvSpaceSelector.setAdapter(adapter);
-        
-        if (!spaceNames.isEmpty()) {
+        actvSpaceSelector.setAdapter(new ArrayAdapter<>(this, R.layout.item_dropdown_luxury, names));
+
+        if (!names.isEmpty()) {
             com.google.android.material.textfield.TextInputLayout til = findViewById(R.id.tilSpaceSelector);
-            til.setHint("Select from " + spaceNames.size() + " spaces");
+            if (til != null) til.setHint("Select from " + names.size() + " spaces");
         }
     }
+
     private String getDbStoragePath(String dbName) {
-        File dbDir = new File(getFilesDir(), dbName);
-        if (!dbDir.exists()) dbDir.mkdirs();
-        return dbDir.getAbsolutePath();
+        File dir = new File(getFilesDir(), dbName);
+        if (!dir.exists()) dir.mkdirs();
+        return dir.getAbsolutePath();
     }
 }

@@ -23,21 +23,15 @@ string toBase64(const string& input) {
     return encoded;
 }
 
-// Robustly trim ALL whitespace characters from both ends
 void trim(string& s) {
     if (s.empty()) return;
     size_t first = s.find_first_not_of(" \t\r\n");
-    if (first == string::npos) {
-        s.clear();
-        return;
-    }
+    if (first == string::npos) { s.clear(); return; }
     size_t last = s.find_last_not_of(" \t\r\n");
     s = s.substr(first, (last - first + 1));
 }
 
-// Helper to decode Base64 strings back to binary
 string fromBase64(const string& input) {
-    // Before decoding, ensure the string is clean
     string cleanInput = input;
     trim(cleanInput);
     if (cleanInput.empty()) return "";
@@ -58,17 +52,17 @@ string fromBase64(const string& input) {
 
 class ServerNode : public DSSE {
 public:
-    void Setup(string dbPath) {
+    void ServerSetup(string dbPath) {
         rocksdb::Options options;
         options.create_if_missing = true;
         
-        // In this integration, we only care about map2 on the server.
-        // map1 is client-side.
+        // Server only needs map2
         rocksdb::Status status = rocksdb::DB::Open(options, dbPath, &Data.map2);
         if (!status.ok()) {
             cerr << "Error opening RocksDB for map2: " << status.ToString() << endl;
             exit(1);
         }
+        Data.map1 = nullptr;  // Client-side only
     }
 };
 
@@ -82,9 +76,9 @@ int main(int argc, char* argv[]) {
     int opCode = stoi(argv[2]);
 
     ServerNode dsse;
-    dsse.Setup(dbPath);
+    dsse.ServerSetup(dbPath);
 
-    if (opCode == 0) { // Update
+    if (opCode == 0) { // Single Update
         if (argc < 5) {
             cerr << "Usage: Update requires <key> <value>" << endl;
             return 1;
@@ -109,6 +103,7 @@ int main(int argc, char* argv[]) {
         for(const auto& res : results) {
             cout << "RESULT:" << toBase64(res) << endl;
         }
+
     } else if (opCode == 2) { // Batch Update - read key\tvalue pairs from stdin
         string line;
         int count = 0;
@@ -127,6 +122,7 @@ int main(int argc, char* argv[]) {
             count++;
         }
         cout << "Batch update successful: " << count << " entries" << endl;
+
     } else {
         cerr << "Invalid OpCode" << endl;
         return 1;

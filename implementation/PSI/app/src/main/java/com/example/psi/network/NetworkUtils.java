@@ -37,22 +37,18 @@ public class NetworkUtils {
         return readResponse(conn);
     }
 
-    // Helper method to perform POST request with JSON body
     public static String performPostRequest(String requestUrl, String jsonBody, String authToken) throws Exception {
         return performRequest(requestUrl, "POST", jsonBody, authToken);
     }
     
-    // Helper method to perform GET request
     public static String performGetRequest(String requestUrl, String authToken) throws Exception {
         return performRequest(requestUrl, "GET", null, authToken);
     }
 
-    // Helper method to perform DELETE request
     public static String performDeleteRequest(String requestUrl, String jsonBody, String authToken) throws Exception {
         return performRequest(requestUrl, "DELETE", jsonBody, authToken);
     }
 
-    // Helper method to perform multipart POST request for file uploads
     public static String performMultipartRequest(String requestUrl, String dbName, List<String> filePaths, String authToken) throws Exception {
         String boundary = "Boundary-" + System.currentTimeMillis();
         URL url = new URL(requestUrl + "?dbName=" + dbName);
@@ -97,6 +93,7 @@ public class NetworkUtils {
 
         return readResponse(conn);
     }
+
     public static String downloadFile(String requestUrl, String destinationDir, String authToken) throws Exception {
         URL url = new URL(requestUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -110,18 +107,15 @@ public class NetworkUtils {
             throw new Exception("HTTP error code: " + conn.getResponseCode());
         }
 
-        // Try to get filename from Content-Disposition header
         String fileName = null;
         String disposition = conn.getHeaderField("Content-Disposition");
         if (disposition != null && disposition.indexOf("filename=") > 0) {
             fileName = disposition.substring(disposition.indexOf("filename=") + 9);
-            // Remove quotes if present
             if (fileName.startsWith("\"") && fileName.endsWith("\"")) {
                 fileName = fileName.substring(1, fileName.length() - 1);
             }
         }
 
-        // Fallback to URL's name if header fails
         if (fileName == null) {
             fileName = "downloaded_file_" + System.currentTimeMillis();
         }
@@ -140,7 +134,6 @@ public class NetworkUtils {
 
     private static String readResponse(HttpURLConnection conn) throws Exception {
         int responseCode = conn.getResponseCode();
-
         StringBuilder response = new StringBuilder();
         try (BufferedReader br = new BufferedReader(
                 new InputStreamReader(
@@ -151,11 +144,15 @@ public class NetworkUtils {
                 response.append(responseLine.trim());
             }
         }
-
         if (responseCode >= 200 && responseCode < 300) {
             return response.toString();
         } else {
             throw new Exception("Error: " + responseCode + " " + response.toString());
         }
+    }
+
+    public static String toBase64(String content) {
+        if (content == null) return "";
+        return android.util.Base64.encodeToString(content.getBytes(StandardCharsets.ISO_8859_1), android.util.Base64.NO_WRAP);
     }
 }

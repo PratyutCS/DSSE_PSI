@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "compile": "g++ cpp/dsse_server.cpp cpp/Update.cpp cpp/Search.cpp cpp/Utilities.cpp -o cpp/dsse_server -lrocksdb -lcryptopp",
+    "compile": "g++ cpp/dsse_server.cpp cpp/Setup.cpp cpp/Update.cpp cpp/Search.cpp cpp/Utilities.cpp -o cpp/dsse_server -lrocksdb -lcryptopp",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -17,7 +17,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Select Uninitialized Space"
+            android:text="Select Database Space"
             android:textColor="@color/text_dim"
             android:textSize="14sp"
             android:fontFamily="sans-serif-medium"
@@ -51,50 +51,145 @@
                 android:contentDescription="Dropdown Arrow" />
         </RelativeLayout>
 
+        <!-- Mode Toggle -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
+            android:layout_marginBottom="16dp">
 
-            <TextView
+            <Button
+                android:id="@+id/btnModeAdd"
                 android:layout_width="0dp"
                 android:layout_weight="1"
+                android:layout_height="48dp"
+                android:text="ADD FILE"
+                android:background="@drawable/bg_button_gold"
+                android:textColor="@android:color/white"
+                android:layout_marginEnd="8dp"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-black"/>
+
+            <Button
+                android:id="@+id/btnModeDelete"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="48dp"
+                android:text="DELETE SIGNAL"
+                android:background="@drawable/bg_button_outline"
+                android:textColor="@color/gold"
+                android:layout_marginStart="8dp"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-black"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/layoutAddFile"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Select Files (.txt)"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="12dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Select Files"
+                    android:textColor="@color/text_dim"
+                    android:textSize="14sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.1"/>
+
+                <Button
+                    android:id="@+id/btnAddFile"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="+ ADD FILE"
+                    android:background="@drawable/bg_button_gold"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:fontFamily="sans-serif-black"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"/>
+            </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvFiles"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginBottom="8dp"
+                android:clipToPadding="false"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/layoutDeleteSignal"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Target Identifier (e.g. ID0)"
                 android:textColor="@color/text_dim"
                 android:textSize="14sp"
                 android:fontFamily="sans-serif-medium"
                 android:textAllCaps="true"
-                android:letterSpacing="0.1"/>
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="8dp"/>
 
-            <Button
-                android:id="@+id/btnAddFile"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:text="+ ADD FILE"
-                android:background="@drawable/bg_button_gold"
+            <EditText
+                android:id="@+id/etTargetId"
+                android:layout_width="match_parent"
+                android:layout_height="60dp"
+                android:background="@drawable/bg_input_field"
+                android:padding="12dp"
+                android:hint="ID0"
                 android:textColor="@android:color/white"
-                android:textSize="12sp"
-                android:fontFamily="sans-serif-black"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"/>
-        </LinearLayout>
+                android:textColorHint="@color/text_dim"
+                android:layout_marginBottom="16dp"/>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rvFiles"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginBottom="16dp"
-            android:clipToPadding="false"/>
+             <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Target Keywords (Range Max 100,000)"
+                android:textColor="@color/text_dim"
+                android:textSize="14sp"
+                android:fontFamily="sans-serif-medium"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="8dp"/>
+
+            <EditText
+                android:id="@+id/etTargetKeywords"
+                android:layout_width="match_parent"
+                android:layout_height="60dp"
+                android:background="@drawable/bg_input_field"
+                android:padding="12dp"
+                android:hint="e.g. 500"
+                android:inputType="number"
+                android:textColor="@android:color/white"
+                android:textColorHint="@color/text_dim"
+                android:layout_marginBottom="16dp"/>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvEmptyMessage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="No uninitialized spaces found."
+            android:text="No spaces found."
             android:textColor="#FF4444"
             android:gravity="center"
             android:visibility="gone"
@@ -115,7 +210,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Note: Only databases with no uploaded files will be shown here for update."
+            android:text="Note: Updates can be performed on any existing space by either adding files or sending delete signals."
             android:textColor="@color/text_dim"
             android:textSize="12sp"
             android:gravity="center"

@@ -1,11 +1,12 @@
 package com.example.psi;
 
-import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
@@ -16,11 +17,10 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.database.Cursor;
-import android.provider.OpenableColumns;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -30,7 +30,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.psi.network.NetworkUtils;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -39,408 +38,349 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class UpdateActivity extends AppCompatActivity {
+    static { System.loadLibrary("psi"); }
 
-    static {
-        System.loadLibrary("psi");
-    }
+    // JNI: Add files → returns [u0,e0,…, "---FILES---", path0,path1,…]
+    private native String[] generateUpdateTokens(String storagePath, byte[] key, int kwSpaceSize, String[] filePaths, int[] keywords, int startingIdIndex);
+    // JNI: Delete signal → returns [u0,e0,…]
+    private native String[] generateDeleteTokens(String storagePath, byte[] key, int kwSpaceSize, String[] identifiers, int[] keywords);
 
-    private native String[] generateTokens(String storagePath, String[] filePaths, int[] keywords);
-
-    private Spinner spinnerSpaces;
-    private Button btnPerformUpdate, btnAddFile;
-    private TextView tvEmptyMessage;
-    private RecyclerView rvFiles;
-    private FileSelectionAdapter adapter;
-    private List<FileSelection> selectedFiles = new ArrayList<>();
-
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final Handler handler = new Handler(Looper.getMainLooper());
+    private static final String TAG = "PSI_UPDATE";
     private static final String PREFS_NAME = "psi_prefs";
+    private static final int KW_SPACE_SIZE = 100000;
 
-    private final ActivityResultLauncher<String> filePickerLauncher = registerForActivityResult(
-            new ActivityResultContracts.GetMultipleContents(),
-            this::handleSelectedFiles
-    );
+    // UI
+    private Spinner spinnerSpaces;
+    private Button btnModeAdd, btnModeDelete, btnPerformUpdate, btnAddFile;
+    private LinearLayout layoutAddFile, layoutDeleteSignal;
+    private EditText etTargetId, etTargetKeywords;
+    private RecyclerView rvFiles;
+    private TextView tvEmptyMessage;
+
+    private FileAdapter fileAdapter;
+    private final List<FileItem> selectedFiles = new ArrayList<>();
+    private boolean isAddMode = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_update);
 
-        spinnerSpaces = findViewById(R.id.spinnerSpaces);
-        btnPerformUpdate = findViewById(R.id.btnPerformUpdate);
-        btnAddFile = findViewById(R.id.btnAddFile);
-        tvEmptyMessage = findViewById(R.id.tvEmptyMessage);
-        rvFiles = findViewById(R.id.rvFiles);
-
-        // Initially disable file adding and update button until DB is selected
-        btnAddFile.setEnabled(false);
-        btnAddFile.setAlpha(0.5f);
-        btnPerformUpdate.setEnabled(false);
-        btnPerformUpdate.setAlpha(0.5f);
-
-        rvFiles.setLayoutManager(new LinearLayoutManager(this));
-        adapter = new FileSelectionAdapter(selectedFiles);
-        rvFiles.setAdapter(adapter);
+        spinnerSpaces       = findViewById(R.id.spinnerSpaces);
+        btnModeAdd          = findViewById(R.id.btnModeAdd);
+        btnModeDelete       = findViewById(R.id.btnModeDelete);
+        btnPerformUpdate    = findViewById(R.id.btnPerformUpdate);
+        btnAddFile          = findViewById(R.id.btnAddFile);
+        layoutAddFile       = findViewById(R.id.layoutAddFile);
+        layoutDeleteSignal  = findViewById(R.id.layoutDeleteSignal);
+        etTargetId          = findViewById(R.id.etTargetId);
+        etTargetKeywords    = findViewById(R.id.etTargetKeywords);
+        rvFiles             = findViewById(R.id.rvFiles);
+        tvEmptyMessage      = findViewById(R.id.tvEmptyMessage);
 
         TextView toolbarTitle = findViewById(R.id.toolbarTitle);
-        toolbarTitle.setText("UPDATE DASHBOARD");
-
+        toolbarTitle.setText("UPDATE PSI");
         View btnBack = findViewById(R.id.btnBack);
         btnBack.setVisibility(View.VISIBLE);
         btnBack.setOnClickListener(v -> finish());
 
+        rvFiles.setLayoutManager(new LinearLayoutManager(this));
+        fileAdapter = new FileAdapter(selectedFiles, this::checkUpdateState);
+        rvFiles.setAdapter(fileAdapter);
+
         btnAddFile.setOnClickListener(v -> filePickerLauncher.launch("*/*"));
         btnPerformUpdate.setOnClickListener(v -> performUpdate());
 
-        fetchEmptySpaces();
+        btnModeAdd.setOnClickListener(v -> setMode(true));
+        btnModeDelete.setOnClickListener(v -> setMode(false));
+
+        spinnerSpaces.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) { checkUpdateState(); }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { checkUpdateState(); }
+        });
+
+        fetchAllSpaces();
     }
 
-    private void updateSpinner(List<String> spaceList) {
-        if (spaceList.isEmpty()) {
-            tvEmptyMessage.setVisibility(View.VISIBLE);
-            spinnerSpaces.setEnabled(false);
-            btnAddFile.setEnabled(false);
-            btnAddFile.setAlpha(0.5f);
-        } else {
-            tvEmptyMessage.setVisibility(View.GONE);
-            spinnerSpaces.setEnabled(true);
-            
-            ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this, 
-                    R.layout.item_dropdown_luxury, android.R.id.text1, spaceList);
-            spinnerSpaces.setAdapter(spinnerAdapter);
+    private void setMode(boolean addMode) {
+        isAddMode = addMode;
+        layoutAddFile.setVisibility(addMode ? View.VISIBLE : View.GONE);
+        layoutDeleteSignal.setVisibility(addMode ? View.GONE : View.VISIBLE);
 
-            // Enable file adding once we have spaces to update
-            btnAddFile.setEnabled(true);
-            btnAddFile.setAlpha(1.0f);
+        btnModeAdd.setBackgroundResource(addMode ? R.drawable.bg_button_gold : R.drawable.bg_button_outline);
+        btnModeDelete.setBackgroundResource(addMode ? R.drawable.bg_button_outline : R.drawable.bg_button_gold);
+        btnModeAdd.setTextColor(addMode ? 0xFFFFFFFF : getResources().getColor(R.color.gold));
+        btnModeDelete.setTextColor(addMode ? getResources().getColor(R.color.gold) : 0xFFFFFFFF);
+
+        btnPerformUpdate.setText(addMode ? "PERFORM UPDATE" : "SEND DELETE SIGNAL");
+        checkUpdateState();
+    }
+
+    private final ActivityResultLauncher<String> filePickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.GetMultipleContents(), this::handleSelectedFiles);
+
+    private void handleSelectedFiles(List<Uri> uris) {
+        for (Uri uri : uris) {
+            String path = copyUriToInternalStorage(uri);
+            if (path != null)
+                selectedFiles.add(new FileItem(getFileName(uri), "", path));
         }
+        fileAdapter.notifyDataSetChanged();
+        checkUpdateState();
+    }
+
+    private void checkUpdateState() {
+        String space = spinnerSpaces.getSelectedItem() != null ? spinnerSpaces.getSelectedItem().toString() : "";
+        boolean validSpace = !space.isEmpty() && !space.equals("No spaces available");
+
+        boolean canUpdate;
+        if (isAddMode) {
+            canUpdate = validSpace && !selectedFiles.isEmpty();
+        } else {
+            String id = etTargetId.getText().toString().trim();
+            String kw = etTargetKeywords.getText().toString().trim();
+            canUpdate = validSpace && !id.isEmpty() && !kw.isEmpty();
+        }
+        btnPerformUpdate.setEnabled(canUpdate);
+        btnPerformUpdate.setAlpha(canUpdate ? 1.0f : 0.5f);
     }
 
     private void performUpdate() {
-        if (selectedFiles.isEmpty()) {
-            Toast.makeText(this, "Please select at least one file", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        String dbName = spinnerSpaces.getSelectedItem() != null ? spinnerSpaces.getSelectedItem().toString() : "";
-        if (dbName.isEmpty()) {
-            Toast.makeText(this, "Please select a space", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Validate keywords
-        for (FileSelection fs : selectedFiles) {
-            if (fs.keyword < 0 || fs.keyword > 100000) {
-                Toast.makeText(this, "Invalid keyword for " + fs.name + ". Must be 0-100000", Toast.LENGTH_SHORT).show();
-                return;
-            }
-        }
-
-        setUIEnabled(false);
-        Toast.makeText(this, "Generating tokens and updating database...", Toast.LENGTH_SHORT).show();
-        
+        String dbName = spinnerSpaces.getSelectedItem().toString();
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String token = prefs.getString("auth_token", null);
-        String ip = prefs.getString("last_ip", BuildConfig.SERVER_IP);
+        String ip    = prefs.getString("last_ip", BuildConfig.SERVER_IP);
         String baseUrl = "http://" + ip + ":3000/api";
 
-        executor.execute(() -> {
-            try {
-                String[] paths = new String[selectedFiles.size()];
-                int[] keywords = new int[selectedFiles.size()];
-                List<String> filePathsList = new ArrayList<>();
-                List<File> tempFilesToDelete = new ArrayList<>();
-                
-                for (int i = 0; i < selectedFiles.size(); i++) {
-                    File tempFile = copyUriToTempFile(selectedFiles.get(i).uri, selectedFiles.get(i).name);
-                    paths[i] = tempFile.getAbsolutePath();
-                    keywords[i] = selectedFiles.get(i).keyword;
-                    filePathsList.add(paths[i]);
-                    tempFilesToDelete.add(tempFile);
-                }
-                
-                // 1. Create encrypted directory in storage path
-                File storageBase = getFilesDir();
-                File encryptedDir = new File(storageBase, "encrypted");
-                if (!encryptedDir.exists()) encryptedDir.mkdirs();
+        setUIEnabled(false);
+        Toast.makeText(this, isAddMode ? "Generating add tokens…" : "Generating delete tokens…", Toast.LENGTH_SHORT).show();
 
-                // 2. Generate Tokens via JNI
-                System.out.println("[UPDATE PSI] tokens and encrypted files generating for DB: " + dbName);
+        new Thread(() -> {
+            try {
                 String storagePath = getDbStoragePath(dbName);
-                String[] jniResult = generateTokens(storagePath, paths, keywords);
-                System.out.println("[UPDATE PSI] tokens and encrypted files generated");
-                
-                // jniResult: [u0, e0, ..., uN, eN, path0, path1, ...]
-                // result.size() * 2 = 200,000 * 2 = 400,000 for tokens
-                // filesCount = paths.length
-                
-                int tokenCount = 200000;
-                int tokenEntries = tokenCount * 2;
-                
-                // 3. Send tokens in batches to server via bulk endpoint
-                System.out.println("[UPDATE PSI] sending tokens to server");
-                if (jniResult != null && jniResult.length >= tokenEntries) {
-                    int BATCH_SIZE = 5000;
-                    
-                    for (int batchStart = 0; batchStart < tokenCount; batchStart += BATCH_SIZE) {
-                        int batchEnd = Math.min(batchStart + BATCH_SIZE, tokenCount);
-                        
-                        JSONArray pairsArray = new JSONArray();
-                        for (int j = batchStart; j < batchEnd; j++) {
+                byte[] spaceKey = CryptoUtils.getSpaceKey(this, dbName);
+                String[] jniResult;
+
+                if (isAddMode) {
+                    // ---- ADD mode ----
+                    String[] paths = new String[selectedFiles.size()];
+                    int[] kws      = new int[selectedFiles.size()];
+                    for (int i = 0; i < selectedFiles.size(); i++) {
+                        paths[i] = selectedFiles.get(i).localPath;
+                        String kwStr = selectedFiles.get(i).keyword;
+                        kws[i] = kwStr.isEmpty() ? 0 : Integer.parseInt(kwStr);
+                    }
+
+                    // Fetch server-side fileCount for unique IDs
+                    String infoUrl = baseUrl + "/get-space-info?dbName=" + Uri.encode(dbName);
+                    String infoResp = NetworkUtils.performGetRequest(infoUrl, token);
+                    int startingId = new JSONObject(infoResp).getInt("fileCount");
+
+                    jniResult = generateUpdateTokens(storagePath, spaceKey, KW_SPACE_SIZE, paths, kws, startingId);
+                    if (jniResult == null) throw new Exception("Native token generation returned null");
+
+                    int sepIdx = -1;
+                    for (int i = 0; i < jniResult.length; i++) {
+                        if ("---FILES---".equals(jniResult[i])) { sepIdx = i; break; }
+                    }
+                    if (sepIdx < 0) throw new Exception("Separator not found in JNI result");
+
+                    int batchSize = 10000;
+                    for (int i = 0; i < sepIdx; i += batchSize * 2) {
+                        JSONArray pairs = new JSONArray();
+                        int end = Math.min(i + batchSize * 2, sepIdx);
+                        for (int j = i; j < end; j += 2) {
                             JSONObject pair = new JSONObject();
-                            pair.put("key", jniResult[j * 2]);
-                            pair.put("value", jniResult[j * 2 + 1]);
-                            pairsArray.put(pair);
+                            pair.put("key",   jniResult[j]);
+                            pair.put("value", jniResult[j + 1]);
+                            pairs.put(pair);
                         }
-                        
                         JSONObject body = new JSONObject();
                         body.put("dbName", dbName);
-                        body.put("pairs", pairsArray);
-                        
-                        Log.i("PSI_UPDATE", "Sending token batch " + (batchStart / BATCH_SIZE + 1));
+                        body.put("pairs", pairs);
                         NetworkUtils.performPostRequest(baseUrl + "/bulk-save-index_value", body.toString(), token);
                     }
-                    Log.i("PSI_UPDATE", "All token batches sent successfully");
-                }
-                
-                // 4. Upload encrypted files to server
-                System.out.println("[UPDATE PSI] uploading encrypted files to server");
-                List<String> encryptedPathsList = new ArrayList<>();
-                if (jniResult != null && jniResult.length > tokenEntries) {
-                    for (int i = tokenEntries; i < jniResult.length; i++) {
-                        encryptedPathsList.add(jniResult[i]);
-                    }
-                    NetworkUtils.performMultipartRequest(baseUrl + "/upload_files", dbName, encryptedPathsList, token);
-                }
-                System.out.println("[UPDATE PSI] encrypted files uploaded to server");
-                
-                // 5. Cleanup encrypted files and temp files from device
-                for (String path : encryptedPathsList) {
-                    new File(path).delete();
-                }
-                for (File tempFile : tempFilesToDelete) {
-                    if (tempFile.exists()) tempFile.delete();
-                }
-                
-                handler.post(() -> {
-                    setUIEnabled(true);
+
+                    List<String> encPaths = new ArrayList<>();
+                    for (int i = sepIdx + 1; i < jniResult.length; i++)
+                        encPaths.add(jniResult[i]);
+                    NetworkUtils.performMultipartRequest(baseUrl + "/upload_files", dbName, encPaths, token);
+
+                    for (String p : encPaths) new File(p).delete();
+                    for (FileItem item : selectedFiles) new File(item.localPath).delete();
                     selectedFiles.clear();
-                    adapter.notifyDataSetChanged();
-                    checkUpdateState();
-                    Toast.makeText(this, "Update complete!", Toast.LENGTH_LONG).show();
+
+                } else {
+                    // ---- DELETE mode ----
+                    String targetId  = etTargetId.getText().toString().trim();
+                    int    targetKw  = Integer.parseInt(etTargetKeywords.getText().toString().trim());
+
+                    jniResult = generateDeleteTokens(storagePath, spaceKey, KW_SPACE_SIZE,
+                            new String[]{targetId}, new int[]{targetKw});
+                    if (jniResult == null) throw new Exception("Native delete token generation returned null");
+
+                    int batchSize = 10000;
+                    for (int i = 0; i < jniResult.length; i += batchSize * 2) {
+                        JSONArray pairs = new JSONArray();
+                        int end = Math.min(i + batchSize * 2, jniResult.length);
+                        for (int j = i; j < end; j += 2) {
+                            JSONObject pair = new JSONObject();
+                            pair.put("key",   jniResult[j]);
+                            pair.put("value", jniResult[j + 1]);
+                            pairs.put(pair);
+                        }
+                        JSONObject body = new JSONObject();
+                        body.put("dbName", dbName);
+                        body.put("pairs", pairs);
+                        NetworkUtils.performPostRequest(baseUrl + "/bulk-save-index_value", body.toString(), token);
+                    }
+                }
+
+                runOnUiThread(() -> {
+                    setUIEnabled(true);
+                    Toast.makeText(this, "Update successful!", Toast.LENGTH_LONG).show();
+                    fileAdapter.notifyDataSetChanged();
+                    finish();
                 });
-                
+
             } catch (Exception e) {
-                e.printStackTrace();
-                handler.post(() -> {
+                Log.e(TAG, "Update failed", e);
+                runOnUiThread(() -> {
                     setUIEnabled(true);
                     Toast.makeText(this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 });
             }
-        });
+        }).start();
     }
 
     private void setUIEnabled(boolean enabled) {
-        float alpha = enabled ? 1.0f : 0.4f;
-        spinnerSpaces.setEnabled(enabled);
-        spinnerSpaces.setAlpha(alpha);
-        btnAddFile.setEnabled(enabled);
-        btnAddFile.setAlpha(alpha);
         btnPerformUpdate.setEnabled(enabled);
-        btnPerformUpdate.setAlpha(alpha);
-        
-        // Pass to adapter to disable individual items
-        adapter.setEnabled(enabled);
+        btnAddFile.setEnabled(enabled);
+        spinnerSpaces.setEnabled(enabled);
+        btnModeAdd.setEnabled(enabled);
+        btnModeDelete.setEnabled(enabled);
     }
 
-    private File copyUriToTempFile(Uri uri, String name) throws Exception {
-        InputStream is = getContentResolver().openInputStream(uri);
-        File cacheDir = getExternalCacheDir();
-        File tempFile = new File(cacheDir, "temp_" + System.currentTimeMillis() + "_" + name);
-        FileOutputStream os = new FileOutputStream(tempFile);
-        
-        byte[] buffer = new byte[8192];
-        int bytesRead;
-        while ((bytesRead = is.read(buffer)) != -1) {
-            os.write(buffer, 0, bytesRead);
-        }
-        os.close();
-        is.close();
-        return tempFile;
-    }
+    private void fetchAllSpaces() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String token = prefs.getString("auth_token", null);
+        String ip    = prefs.getString("last_ip", BuildConfig.SERVER_IP);
+        String url   = "http://" + ip + ":3000/api/get-spaces";
 
-    // --- Inner Models & Adapter ---
-
-    private static class FileSelection {
-        Uri uri;
-        String name;
-        int keyword = 0;
-
-        FileSelection(Uri uri, String name) {
-            this.uri = uri;
-            this.name = name;
-        }
-    }
-
-    private class FileSelectionAdapter extends RecyclerView.Adapter<FileSelectionAdapter.ViewHolder> {
-        private final List<FileSelection> items;
-        private boolean isEnabled = true;
-
-        FileSelectionAdapter(List<FileSelection> items) {
-            this.items = items;
-        }
-
-        void setEnabled(boolean enabled) {
-            this.isEnabled = enabled;
-            notifyDataSetChanged();
-        }
-
-        @NonNull
-        @Override
-        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_file_selection, parent, false);
-            return new ViewHolder(view);
-        }
-
-        @Override
-        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            FileSelection fs = items.get(position);
-            holder.tvName.setText(fs.name);
-            holder.tvPath.setText(fs.uri.toString());
-
-            // Remove previous watcher to avoid multiple triggers on reused view
-            if (holder.keywordWatcher != null) {
-                holder.etKeyword.removeTextChangedListener(holder.keywordWatcher);
-            }
-
-            holder.etKeyword.setText(String.valueOf(fs.keyword));
-            
-            holder.itemView.setEnabled(isEnabled);
-            holder.itemView.setAlpha(isEnabled ? 1.0f : 0.4f);
-            holder.etKeyword.setEnabled(isEnabled);
-            holder.btnRemove.setEnabled(isEnabled);
-            
-            holder.keywordWatcher = new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
-                @Override public void afterTextChanged(Editable s) {
-                    try {
-                        if (s != null && s.length() > 0) {
-                            fs.keyword = Integer.parseInt(s.toString());
-                        }
-                    } catch (Exception ignored) {}
-                }
-            };
-            holder.etKeyword.addTextChangedListener(holder.keywordWatcher);
-
-            holder.btnRemove.setOnClickListener(v -> {
-                int pos = holder.getAdapterPosition();
-                if (pos != RecyclerView.NO_POSITION) {
-                    items.remove(pos);
-                    notifyItemRemoved(pos);
-                    checkUpdateState();
-                }
-            });
-        }
-
-        @Override
-        public int getItemCount() {
-            return items.size();
-        }
-
-        class ViewHolder extends RecyclerView.ViewHolder {
-            TextView tvName, tvPath;
-            EditText etKeyword;
-            ImageButton btnRemove;
-            TextWatcher keywordWatcher;
-
-            ViewHolder(View itemView) {
-                super(itemView);
-                tvName = itemView.findViewById(R.id.tvFileName);
-                tvPath = itemView.findViewById(R.id.tvFilePath);
-                etKeyword = itemView.findViewById(R.id.etKeyword);
-                btnRemove = itemView.findViewById(R.id.btnRemoveFile);
-            }
-        }
-    }
-
-    private void checkUpdateState() {
-        boolean hasFiles = !selectedFiles.isEmpty();
-        btnPerformUpdate.setEnabled(hasFiles);
-        btnPerformUpdate.setAlpha(hasFiles ? 1.0f : 0.5f);
-    }
-
-    private void handleSelectedFiles(List<Uri> uris) {
-        if (uris == null || uris.isEmpty()) return;
-        for (Uri uri : uris) {
-            String name = getFileNameFromUri(uri);
-            selectedFiles.add(new FileSelection(uri, name));
-        }
-        adapter.notifyDataSetChanged();
-        checkUpdateState();
-    }
-
-    private String getFileNameFromUri(Uri uri) {
-        String result = null;
-        if (uri.getScheme() != null && uri.getScheme().equals("content")) {
-            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    int index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
-                    if (index != -1) {
-                        result = cursor.getString(index);
-                    }
-                }
+        new Thread(() -> {
+            try {
+                String response = NetworkUtils.performGetRequest(url, token);
+                JSONObject json = new JSONObject(response);
+                JSONArray spaces = json.optJSONArray("spaces");
+                runOnUiThread(() -> updateSpaceSpinner(spaces));
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e(TAG, "Error fetching spaces", e);
+                runOnUiThread(() -> Toast.makeText(this, "Error fetching spaces", Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void updateSpaceSpinner(JSONArray spaces) {
+        List<String> list = new ArrayList<>();
+        if (spaces != null) {
+            for (int i = 0; i < spaces.length(); i++) {
+                try { list.add(spaces.getString(i)); } catch (Exception ignored) {}
+            }
+        }
+        if (list.isEmpty()) {
+            list.add("No spaces available");
+            tvEmptyMessage.setVisibility(View.VISIBLE);
+        } else {
+            tvEmptyMessage.setVisibility(View.GONE);
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, list);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerSpaces.setAdapter(adapter);
+    }
+
+    private String getDbStoragePath(String dbName) {
+        File dir = new File(getFilesDir(), dbName);
+        if (!dir.exists()) dir.mkdirs();
+        return dir.getAbsolutePath();
+    }
+
+    private String getFileName(Uri uri) {
+        String result = null;
+        if ("content".equals(uri.getScheme())) {
+            try (Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    int idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (idx >= 0) result = c.getString(idx);
+                }
             }
         }
         if (result == null) {
             result = uri.getPath();
             int cut = result != null ? result.lastIndexOf('/') : -1;
-            if (cut != -1) result = result.substring(cut + 1);
+            if (cut >= 0) result = result.substring(cut + 1);
         }
         return result;
     }
 
-    private void fetchEmptySpaces() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String token = prefs.getString("auth_token", null);
-        String ip = prefs.getString("last_ip", BuildConfig.SERVER_IP);
-        String url = "http://" + ip + ":3000/api/get-spaces?uninitialized=true";
+    private String copyUriToInternalStorage(Uri uri) {
+        try {
+            String name = getFileName(uri);
+            File file = new File(getFilesDir(), name);
+            try (InputStream is = getContentResolver().openInputStream(uri);
+                 FileOutputStream os = new FileOutputStream(file)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
+            }
+            return file.getAbsolutePath();
+        } catch (Exception e) {
+            Log.e(TAG, "Copy failed", e);
+            return null;
+        }
+    }
 
-        if (token == null) {
-            Toast.makeText(this, "Login required", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
+    static class FileItem {
+        String name, keyword, localPath;
+        FileItem(String n, String k, String p) { name = n; keyword = k; localPath = p; }
+    }
+
+    static class FileAdapter extends RecyclerView.Adapter<FileVH> {
+        private final List<FileItem> files;
+        private final Runnable onChange;
+        FileAdapter(List<FileItem> f, Runnable r) { files = f; onChange = r; }
+
+        @NonNull @Override
+        public FileVH onCreateViewHolder(@NonNull ViewGroup parent, int type) {
+            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_file_selection, parent, false);
+            return new FileVH(v);
         }
 
-        executor.execute(() -> {
-            try {
-                String response = NetworkUtils.performGetRequest(url, token);
-                JSONObject jsonResponse = new JSONObject(response);
-                JSONArray spacesJson = jsonResponse.optJSONArray("spaces");
-                
-                List<String> spaceList = new ArrayList<>();
-                if (spacesJson != null) {
-                    for (int i = 0; i < spacesJson.length(); i++) {
-                        spaceList.add(spacesJson.getString(i));
-                    }
-                }
-
-                handler.post(() -> updateSpinner(spaceList));
-            } catch (Exception e) {
-                e.printStackTrace();
-                handler.post(() -> Toast.makeText(this, "Fetch failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
-            }
-        });
+        @Override public void onBindViewHolder(@NonNull FileVH h, int pos) {
+            FileItem item = files.get(pos);
+            h.tvFileName.setText(item.name);
+            h.etKeyword.setText(item.keyword);
+            h.etKeyword.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
+                @Override public void afterTextChanged(Editable s) { item.keyword = s.toString(); onChange.run(); }
+            });
+            h.btnRemove.setOnClickListener(v -> {
+                int p = h.getAdapterPosition();
+                if (p != RecyclerView.NO_POSITION) { files.remove(p); notifyItemRemoved(p); onChange.run(); }
+            });
+        }
+        @Override public int getItemCount() { return files.size(); }
     }
-    private String getDbStoragePath(String dbName) {
-        File dbDir = new File(getFilesDir(), dbName);
-        if (!dbDir.exists()) dbDir.mkdirs();
-        return dbDir.getAbsolutePath();
+
+    static class FileVH extends RecyclerView.ViewHolder {
+        TextView tvFileName; EditText etKeyword; ImageButton btnRemove;
+        FileVH(View v) {
+            super(v);
+            tvFileName = v.findViewById(R.id.tvFileName);
+            etKeyword  = v.findViewById(R.id.etKeyword);
+            btnRemove  = v.findViewById(R.id.btnRemoveFile);
+        }
     }
 }

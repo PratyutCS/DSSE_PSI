@@ -23,6 +23,23 @@ import java.util.concurrent.Executors;
 
 public class DeleteSpaceActivity extends AppCompatActivity {
 
+    static {
+        System.loadLibrary("psi");
+    }
+    private native void clearNativeDB(String storagePath);
+
+    private void deleteRecursively(java.io.File fileOrDirectory) {
+        if (fileOrDirectory.isDirectory()) {
+            java.io.File[] children = fileOrDirectory.listFiles();
+            if (children != null) {
+                for (java.io.File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+        fileOrDirectory.delete();
+    }
+
     private LinearLayout llSpaceList;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -115,6 +132,11 @@ public class DeleteSpaceActivity extends AppCompatActivity {
             try {
                 NetworkUtils.performDeleteRequest(url, body.toString(), token);
                 handler.post(() -> {
+                    // Local Cleanup: Wipe out keys, counters, RocksDB locally too
+                    String storagePath = new java.io.File(getFilesDir(), name).getAbsolutePath();
+                    clearNativeDB(storagePath);
+                    deleteRecursively(new java.io.File(storagePath));
+
                     Toast.makeText(this, "Space Deleted", Toast.LENGTH_SHORT).show();
                     refreshList();
                 });
