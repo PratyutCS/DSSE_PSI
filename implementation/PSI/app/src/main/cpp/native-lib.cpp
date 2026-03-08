@@ -128,7 +128,15 @@ Java_com_example_psi_UpdateActivity_generateUpdateTokens(
 
         int currentId = (int)startingIdIndex + i;
         std::string ind = "ID" + std::to_string(currentId);
-        std::string outPath = std::string(sPath) + "/" + ind;
+        
+        std::string fPathStr(fPath);
+        std::string ext = "";
+        size_t dotPos = fPathStr.find_last_of('.');
+        if (dotPos != std::string::npos) {
+            ext = fPathStr.substr(dotPos);
+        }
+        std::string outPath = std::string(sPath) + "/" + ind + ext;
+        
         encryptFileCBC(g_dsse->Get_Client_sk(), fPath, outPath);
         encPaths.push_back(outPath);
 

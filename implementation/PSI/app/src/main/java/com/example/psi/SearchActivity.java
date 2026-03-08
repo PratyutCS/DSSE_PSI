@@ -172,7 +172,16 @@ public class SearchActivity extends AppCompatActivity {
                     try {
                         String dlName = NetworkUtils.downloadFile(dlUrl, downloadDir.getAbsolutePath(), token);
                         File encFile = new File(downloadDir, dlName);
-                        File decFile = new File(decryptedDir, dlName.replace(fileId, fileId + "_decrypted"));
+
+                        // Separate out the extension and put it back behind the decrypted file
+                        String extension = "";
+                        int dotIndex = dlName.lastIndexOf('.');
+                        if (dotIndex > 0) {
+                            extension = dlName.substring(dotIndex);
+                        }
+                        
+                        String decryptedFileName = fileId + "_decrypted" + extension;
+                        File decFile = new File(decryptedDir, decryptedFileName);
 
                         decryptResultFile(storagePath, spaceKey, encFile.getAbsolutePath(), decFile.getAbsolutePath());
                     } catch (Exception e) {
