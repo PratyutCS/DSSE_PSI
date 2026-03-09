@@ -98,6 +98,23 @@ public class SearchActivity extends AppCompatActivity {
             Toast.makeText(this, "Please enter both range parameters", Toast.LENGTH_SHORT).show();
             return;
         }
+        
+        int aVal, bVal;
+        try {
+            aVal = Integer.parseInt(p1);
+            bVal = Integer.parseInt(p2);
+        } catch (NumberFormatException e) {
+            Toast.makeText(this, "Keywords must be valid numbers.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (aVal < 0 || aVal >= KW_SPACE_SIZE || bVal < 0 || bVal >= KW_SPACE_SIZE) {
+            int maxKw = KW_SPACE_SIZE - 1;
+            Toast.makeText(this, "Keywords must be between 0 and " + maxKw + ".", Toast.LENGTH_LONG).show();
+            etParam1.setError("Must be 0 to " + maxKw);
+            etParam2.setError("Must be 0 to " + maxKw);
+            return;
+        }
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String token  = prefs.getString("auth_token", null);

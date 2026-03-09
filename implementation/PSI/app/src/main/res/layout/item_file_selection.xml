@@ -65,10 +65,10 @@
             android:layout_height="40dp"
             android:background="@drawable/bg_input_field"
             android:gravity="center"
-            android:hint="0-99999"
+            android:hint="0-999"
             android:inputType="number"
-            android:maxLength="6"
-            android:textColor="@color/text_light"
+            android:maxLength="3"
+            android:textColor="@color/text_light"   
             android:textSize="14sp"
             android:fontFamily="sans-serif-medium"/>
     </LinearLayout>

@@ -128,7 +128,7 @@ public class UpdateActivity extends AppCompatActivity {
         for (Uri uri : uris) {
             String path = copyUriToInternalStorage(uri);
             if (path != null)
-                selectedFiles.add(new FileItem(getFileName(uri), "", path));
+                selectedFiles.add(new FileItem(getFileName(uri), "0", path)); // Default keyword = 0
         }
         fileAdapter.notifyDataSetChanged();
         checkUpdateState();
@@ -152,6 +152,36 @@ public class UpdateActivity extends AppCompatActivity {
 
     private void performUpdate() {
         String dbName = spinnerSpaces.getSelectedItem().toString();
+        int maxKw = KW_SPACE_SIZE - 1;
+        
+        // Input validation before starting background work
+        if (isAddMode) {
+            for (FileItem item : selectedFiles) {
+                try {
+                    int val = item.keyword.isEmpty() ? 0 : Integer.parseInt(item.keyword);
+                    if (val < 0 || val > maxKw) {
+                        Toast.makeText(this, "File '" + item.name + "' has keyword out of range 0-" + maxKw, Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                } catch (NumberFormatException e) {
+                    Toast.makeText(this, "File '" + item.name + "' has an invalid keyword number.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+        } else {
+            try {
+                int kw = Integer.parseInt(etTargetKeywords.getText().toString().trim());
+                if (kw < 0 || kw > maxKw) {
+                    Toast.makeText(this, "Delete keyword must be 0 to " + maxKw, Toast.LENGTH_LONG).show();
+                    etTargetKeywords.setError("Must be 0 to " + maxKw);
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                Toast.makeText(this, "Invalid delete target keyword number.", Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
+
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String token = prefs.getString("auth_token", null);
         String ip    = prefs.getString("last_ip", BuildConfig.SERVER_IP);
