@@ -37,7 +37,7 @@ public class SearchActivity extends AppCompatActivity {
     // JNI: returns 12 strings [stk1_l(kw,st,c), stk1_e(kw,st,c), stk2_l(kw,st,c), stk2_e(kw,st,c)]
     private native String[] getSearchTokens(String storagePath, byte[] key, int a, int b, int kwSpaceSize);
     // JNI: bitmap post-processing
-    private native int[] performPostProcessing(int numIDs, int kwSpaceSize,
+    private native String[] performPostProcessing(int numIDs, int kwSpaceSize,
                                                 String[] r1l, String[] r1e, String[] r2l, String[] r2e,
                                                 int a, int b);
     // JNI: decrypt a downloaded file
@@ -54,7 +54,7 @@ public class SearchActivity extends AppCompatActivity {
 
     private static final String TAG = "PSI_SEARCH";
     private static final String PREFS_NAME = "psi_prefs";
-    private static final int KW_SPACE_SIZE = 100000;
+    private static final int KW_SPACE_SIZE = 1000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,6 +124,8 @@ public class SearchActivity extends AppCompatActivity {
                 int a = Integer.parseInt(p1);
                 int b = Integer.parseInt(p2);
 
+                Log.i(TAG, "SearchActivity calling getSearchTokens with keywords: a=" + a + ", b=" + b);
+
                 Log.i(TAG, "Generating search tokens for [" + a + ", " + b + "]");
                 String[] tokens = getSearchTokens(storagePath, spaceKey, a, b, KW_SPACE_SIZE);
                 if (tokens == null || tokens.length < 12)
@@ -158,10 +160,26 @@ public class SearchActivity extends AppCompatActivity {
                 String infoResp = NetworkUtils.performGetRequest(infoUrl, token);
                 int numIDs = new JSONObject(infoResp).getInt("fileCount");
 
-                int[] matchedIds = performPostProcessing(numIDs, KW_SPACE_SIZE,
+                String[] postProcessRes = performPostProcessing(numIDs, KW_SPACE_SIZE,
                         serverResults[0], serverResults[1],
                         serverResults[2], serverResults[3],
                         a, b);
+
+                if (postProcessRes == null || postProcessRes.length < 4) {
+                    throw new Exception("performPostProcessing returned invalid data");
+                }
+
+                String bitmapsStr = "Search 1 (Kw: " + a + ", " + postProcessRes[0] + "\n" +
+                                    "Search 2 (Kw: " + b + ", " + postProcessRes[1] + "\n" +
+                                    "Search 2 (Kw: " + b + ", " + postProcessRes[2] + "\n" +
+                                    "Resultant bitmap: " + postProcessRes[3] + "\n\n";
+
+                int[] matchedIds = new int[postProcessRes.length - 4];
+                for (int i = 4; i < postProcessRes.length; i++) {
+                    try {
+                        matchedIds[i - 4] = Integer.parseInt(postProcessRes[i]);
+                    } catch (Exception e) {}
+                }
 
                 if (!downloadDir.exists()) downloadDir.mkdirs();
                 if (!decryptedDir.exists()) decryptedDir.mkdirs();
@@ -190,12 +208,15 @@ public class SearchActivity extends AppCompatActivity {
                 }
 
                 handler.post(() -> {
+                    tvResultsTitle.setVisibility(View.VISIBLE);
+                    svResults.setVisibility(View.VISIBLE);
+
                     if (matchedIds.length == 0) {
                         Toast.makeText(this, "No matching records", Toast.LENGTH_LONG).show();
-                        tvResultsTitle.setVisibility(View.GONE);
-                        svResults.setVisibility(View.GONE);
+                        tvResults.setText(bitmapsStr + "No matching records found.");
                     } else {
                         StringBuilder sb = new StringBuilder();
+                        sb.append(bitmapsStr);
                         sb.append("Files recovered to: ").append(decryptedDir.getAbsolutePath()).append("\n\n");
                         for (int i = 0; i < matchedIds.length; i++) {
                             sb.append("ID").append(matchedIds[i]);
@@ -203,8 +224,6 @@ public class SearchActivity extends AppCompatActivity {
                             if ((i + 1) % 5 == 0) sb.append("\n");
                         }
                         tvResults.setText(sb.toString());
-                        tvResultsTitle.setVisibility(View.VISIBLE);
-                        svResults.setVisibility(View.VISIBLE);
                         Toast.makeText(this, "Found " + matchedIds.length + " match(es)!", Toast.LENGTH_LONG).show();
                     }
                 });

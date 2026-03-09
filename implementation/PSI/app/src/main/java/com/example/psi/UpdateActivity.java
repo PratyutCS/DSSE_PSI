@@ -49,7 +49,7 @@ public class UpdateActivity extends AppCompatActivity {
 
     private static final String TAG = "PSI_UPDATE";
     private static final String PREFS_NAME = "psi_prefs";
-    private static final int KW_SPACE_SIZE = 100000;
+    private static final int KW_SPACE_SIZE = 1000;
 
     // UI
     private Spinner spinnerSpaces;
@@ -403,12 +403,25 @@ public class UpdateActivity extends AppCompatActivity {
         @Override public void onBindViewHolder(@NonNull FileVH h, int pos) {
             FileItem item = files.get(pos);
             h.tvFileName.setText(item.name);
+            
+            // Very important: remove the old TextWatcher before setText 
+            // to stop it from changing the previous list item's keyword!
+            if (h.currentWatcher != null) {
+                h.etKeyword.removeTextChangedListener(h.currentWatcher);
+            }
+            
             h.etKeyword.setText(item.keyword);
-            h.etKeyword.addTextChangedListener(new TextWatcher() {
+            
+            h.currentWatcher = new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
                 @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
-                @Override public void afterTextChanged(Editable s) { item.keyword = s.toString(); onChange.run(); }
-            });
+                @Override public void afterTextChanged(Editable s) { 
+                    item.keyword = s.toString(); 
+                    onChange.run(); 
+                }
+            };
+            h.etKeyword.addTextChangedListener(h.currentWatcher);
+            
             h.btnRemove.setOnClickListener(v -> {
                 int p = h.getAdapterPosition();
                 if (p != RecyclerView.NO_POSITION) { files.remove(p); notifyItemRemoved(p); onChange.run(); }
@@ -419,6 +432,8 @@ public class UpdateActivity extends AppCompatActivity {
 
     static class FileVH extends RecyclerView.ViewHolder {
         TextView tvFileName; EditText etKeyword; ImageButton btnRemove;
+        TextWatcher currentWatcher;
+        
         FileVH(View v) {
             super(v);
             tvFileName = v.findViewById(R.id.tvFileName);

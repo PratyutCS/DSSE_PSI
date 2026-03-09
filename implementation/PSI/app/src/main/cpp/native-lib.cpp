@@ -140,6 +140,8 @@ Java_com_example_psi_UpdateActivity_generateUpdateTokens(
         encryptFileCBC(g_dsse->Get_Client_sk(), fPath, outPath);
         encPaths.push_back(outPath);
 
+        LOGI("Update_client called: file=%s, ID=%d, keyword=%d", ind.c_str(), currentId, (int)kws[i]);
+
         std::vector<std::tuple<std::string, std::string>> U_list;
         Update_client(*g_dsse, true, ind, currentId, (int)kws[i], KS, U_list);
 
@@ -230,6 +232,8 @@ Java_com_example_psi_SearchActivity_getSearchTokens(
     std::vector<int> KS;
     for (int i = 0; i < (int)kwSpaceSize; i++) KS.push_back(i);
 
+    LOGI("Search_client called with range_query: [%d, %d]", (int)a, (int)b);
+
     std::tuple<std::string,std::string,int> stk1_l, stk1_e, stk2_l, stk2_e;
     Search_client(*g_dsse, std::make_tuple((int)a, (int)b), KS, stk1_l, stk1_e, stk2_l, stk2_e);
 
@@ -250,7 +254,7 @@ Java_com_example_psi_SearchActivity_getSearchTokens(
     return ret;
 }
 
-JNIEXPORT jintArray JNICALL
+JNIEXPORT jobjectArray JNICALL
 Java_com_example_psi_SearchActivity_performPostProcessing(
         JNIEnv *env, jobject, jint numIDs, jint kwSpaceSize,
         jobjectArray jR1l, jobjectArray jR1e, jobjectArray jR2l, jobjectArray jR2e,
@@ -273,16 +277,72 @@ Java_com_example_psi_SearchActivity_performPostProcessing(
         size_t p = s.find_last_not_of('_');
         return (p != std::string::npos) ? s.substr(0, p+1) : "";
     };
+
     std::vector<bool> a_lbm(N, false), b_lbm(N, false), b_ebm(N, false);
+
+    // Search 1 gives us less-than `a`.
     for (auto &id : res1_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) a_lbm[idx] = true; } catch (...) {} }
-    if ((int)a > m/2) { for (int i = 0; i < N; i++) a_lbm[i] = !a_lbm[i]; }
+    
+    // We invert it directly to get GE
+    std::vector<bool> a_ge_bm(N, false);
+    for (int i = 0; i < N; i++) a_ge_bm[i] = !a_lbm[i];
+    
+    std::string b1_type = "ge"; // This is ALWAYS considered a "Greater than or Equal" condition logic-wise!
+    std::string b1_raw_str = "";
+    for (int i = 0; i < N; i++) b1_raw_str += a_ge_bm[i] ? "1" : "0";
+    LOGI("Search 1 (%s) bitmap: %s", b1_type.c_str(), b1_raw_str.c_str());
+
+    // Search 2 gives us less-than `b`.
     for (auto &id : res2_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) b_lbm[idx] = true; } catch (...) {} }
-    if ((int)b > m/2) { for (int i = 0; i < N; i++) b_lbm[i] = !b_lbm[i]; }
+    
+    std::string b2_type = "l";
+    std::string b2_raw_str = "";
+    for (int i = 0; i < N; i++) b2_raw_str += b_lbm[i] ? "1" : "0";
+    LOGI("Search 2 (%s) bitmap: %s", b2_type.c_str(), b2_raw_str.c_str());
+    
+    // Search 2 ALSO gives us equal `b`.
     for (auto &id : res2_e) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) b_ebm[idx] = true; } catch (...) {} }
+    
+    std::string b3_type = "e";
+    std::string b3_raw_str = "";
+    for (int i = 0; i < N; i++) b3_raw_str += b_ebm[i] ? "1" : "0";
+    LOGI("Search 2 (%s) bitmap: %s", b3_type.c_str(), b3_raw_str.c_str());
+
+    // Compute Less Than or Equal (LE) for Search 2
+    std::vector<bool> b_le_bm(N, false);
+    std::string b_le_str = "";
+    for (int i = 0; i < N; i++) {
+        b_le_bm[i] = b_lbm[i] || b_ebm[i];
+        b_le_str += b_le_bm[i] ? "1" : "0";
+    }
+
     std::vector<int> matched;
-    for (int i = 0; i < N; i++) { if (!a_lbm[i] && (b_lbm[i] || b_ebm[i])) matched.push_back(i); }
-    jintArray result = env->NewIntArray((int)matched.size());
-    if (!matched.empty()) env->SetIntArrayRegion(result, 0, (int)matched.size(), matched.data());
+    std::string resultant_str = "";
+    for (int i = 0; i < N; i++) { 
+        // Final logical intersection: Greater-than-or-Equal (a) AND Less-than-or-Equal (b)
+        bool is_match = a_ge_bm[i] && b_le_bm[i];
+        resultant_str += is_match ? "1" : "0";
+        if (is_match) matched.push_back(i); 
+    }
+    
+    LOGI("Resultant bitmap:     %s", resultant_str.c_str());
+
+    std::vector<std::string> resultsVec;
+    resultsVec.push_back(b1_type + ") bitmap: " + b1_raw_str);
+    resultsVec.push_back(b2_type + ") bitmap: " + b2_raw_str);
+    resultsVec.push_back(b3_type + ") bitmap: " + b3_raw_str);
+    resultsVec.push_back(resultant_str);
+
+    for (int id : matched) {
+        resultsVec.push_back(std::to_string(id));
+    }
+
+    jobjectArray result = env->NewObjectArray((int)resultsVec.size(), env->FindClass("java/lang/String"), nullptr);
+    for (size_t i = 0; i < resultsVec.size(); i++) {
+        jstring js = env->NewStringUTF(resultsVec[i].c_str());
+        env->SetObjectArrayElement(result, i, js);
+        env->DeleteLocalRef(js);
+    }
     return result;
 }
 
