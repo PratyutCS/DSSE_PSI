@@ -107,6 +107,28 @@
             android:textAllCaps="true"/>
 
         <TextView
+            android:id="@+id/tvProgress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Processing..."
+            android:textColor="@color/neon_cyan"
+            android:textSize="12sp"
+            android:textAlignment="center"
+            android:visibility="gone"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp"/>
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:max="100"
+            android:progress="0"
+            android:visibility="gone"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
             android:id="@+id/tvResultsTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

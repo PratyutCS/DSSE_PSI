@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <fstream>
 #include <bitset>
+#include <future>
+#include <mutex>
+#include <sys/stat.h>
 #include <android/log.h>
 
 #include "Lambda_Optimized/src/Lambda.h"
@@ -18,6 +21,7 @@
 #include <cryptopp/filters.h>
 #include <cryptopp/modes.h>
 #include <cryptopp/base64.h>
+#include <cryptopp/files.h>
 
 #define TAG "PSI_NATIVE"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -42,22 +46,34 @@ static std::string fromBase64(const std::string &input) {
 }
 
 // --------------- File Encryption (AES-CBC) ---------------
+static std::mutex g_update_mutex;
 
 static void encryptFileCBC(const CryptoPP::SecByteBlock &key, const std::string &inPath, const std::string &outPath) {
-    using namespace CryptoPP;
-    std::ifstream ifs(inPath, std::ios::binary);
-    if (!ifs) return;
-    std::string plain((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    SecByteBlock iv(AES::BLOCKSIZE);
-    AutoSeededRandomPool prng;
-    prng.GenerateBlock(iv, iv.size());
-    std::string cipher;
-    CBC_Mode<AES>::Encryption enc;
-    enc.SetKeyWithIV(key, key.size(), iv);
-    StringSource(plain, true, new StreamTransformationFilter(enc, new StringSink(cipher)));
-    std::ofstream ofs(outPath, std::ios::binary);
-    ofs.write((const char*)iv.data(), iv.size());
-    ofs.write(cipher.data(), cipher.size());
+    try {
+        CryptoPP::AutoSeededRandomPool prng;
+        CryptoPP::byte iv[CryptoPP::AES::BLOCKSIZE];
+        prng.GenerateBlock(iv, sizeof(iv));
+
+        CryptoPP::CBC_Mode<CryptoPP::AES>::Encryption enc;
+        enc.SetKeyWithIV(key, key.size(), iv);
+
+        std::ofstream ofs(outPath, std::ios::binary);
+        if (!ofs) {
+            LOGE("Encryption Error: Could not open output file %s", outPath.c_str());
+            return;
+        }
+        ofs.write((const char*)iv, sizeof(iv));
+
+        CryptoPP::FileSource fs(inPath.c_str(), true,
+            new CryptoPP::StreamTransformationFilter(enc,
+                new CryptoPP::FileSink(ofs)
+            )
+        );
+    } catch (const CryptoPP::Exception &e) {
+        LOGE("Encryption CryptoPP Error: %s", e.what());
+    } catch (const std::exception &e) {
+        LOGE("Encryption Std Error: %s", e.what());
+    }
 }
 
 static void decryptFileCBC(const CryptoPP::SecByteBlock &key, const std::string &inPath, const std::string &outPath) {
@@ -80,21 +96,41 @@ static void decryptFileCBC(const CryptoPP::SecByteBlock &key, const std::string 
 // --------------- DSSE LifeCycle ---------------
 
 static DSSE* g_dsse = nullptr;
+static std::string g_lastPath = "";
 
 static void initDSSE(const std::string &basePath, const unsigned char* keyData, size_t keyLen) {
-    if (g_dsse) { delete g_dsse; g_dsse = nullptr; }
+    if (g_dsse && g_lastPath == basePath) {
+        // Already initialized for this space, just return.
+        return;
+    }
+
+    if (g_dsse) {
+        delete g_dsse;
+        g_dsse = nullptr;
+    }
+
     g_dsse = new DSSE();
+    g_lastPath = basePath;
+
     if (keyData && keyLen >= 16) {
         CryptoPP::SecByteBlock sk(keyData, 16);
         g_dsse->Set_Client_sk(sk);
         g_dsse->Data.client_sk = sk;
     }
+
     rocksdb::Options opts;
     opts.create_if_missing = true;
+    
+    // Performance Tweak: Increase parallelism for mobile
+    opts.IncreaseParallelism();
+    opts.OptimizeLevelStyleCompaction();
+    
     std::string sigmaPath = basePath + "/Sigma_map1";
     rocksdb::DB* db1 = nullptr;
     rocksdb::Status s = rocksdb::DB::Open(opts, sigmaPath, &db1);
-    if (!s.ok()) LOGE("RocksDB Error: %s", s.ToString().c_str());
+    if (!s.ok()) {
+        LOGE("RocksDB Error: %s", s.ToString().c_str());
+    }
     g_dsse->Data.map1 = db1;
     g_dsse->Data.map2 = nullptr;
 }
@@ -103,79 +139,96 @@ extern "C" {
 
 JNIEXPORT void JNICALL
 Java_com_example_psi_MainActivity_initializeNative(JNIEnv *env, jobject, jstring storagePath) {}
-
 JNIEXPORT jobjectArray JNICALL
 Java_com_example_psi_UpdateActivity_generateUpdateTokens(
         JNIEnv *env, jobject, jstring jStoragePath, jbyteArray jKey, jint kwSpaceSize,
         jobjectArray jFilePaths, jintArray jKeywords, jint startingIdIndex) {
 
-    const char *sPath = env->GetStringUTFChars(jStoragePath, nullptr);
+    const char *sPathChars = env->GetStringUTFChars(jStoragePath, nullptr);
+    std::string basePath(sPathChars);
+    env->ReleaseStringUTFChars(jStoragePath, sPathChars);
+
     jbyte* kData = env->GetByteArrayElements(jKey, nullptr);
-    initDSSE(sPath, (const unsigned char*)kData, (size_t)env->GetArrayLength(jKey));
+    initDSSE(basePath, (const unsigned char*)kData, (size_t)env->GetArrayLength(jKey));
+    env->ReleaseByteArrayElements(jKey, kData, JNI_ABORT);
+
+    if (!g_dsse) return nullptr;
 
     jsize numFiles = env->GetArrayLength(jFilePaths);
     jint *kws = env->GetIntArrayElements(jKeywords, nullptr);
 
+    std::vector<std::string> filePaths;
+    for (int i = 0; i < numFiles; i++) {
+        jstring js = (jstring)env->GetObjectArrayElement(jFilePaths, i);
+        const char *f = env->GetStringUTFChars(js, nullptr);
+        filePaths.push_back(std::string(f));
+        env->ReleaseStringUTFChars(js, f);
+        env->DeleteLocalRef(js);
+    }
+
     std::vector<int> KS;
     for (int i = 0; i < (int)kwSpaceSize; i++) KS.push_back(i);
 
-    std::vector<std::string> allTokens;
-    std::vector<std::string> encPaths;
+    std::string encDir = basePath + "/encrypted";
+    mkdir(encDir.c_str(), 0777);
 
-    for (int i = 0; i < numFiles; i++) {
-        jstring js = (jstring)env->GetObjectArrayElement(jFilePaths, i);
-        const char *fPath = env->GetStringUTFChars(js, nullptr);
+    // Parallelize Encryption and Token Generation
+    std::vector<std::future<std::vector<std::tuple<std::string, std::string>>>> futures;
 
-        int currentId = (int)startingIdIndex + i;
-        std::string ind = "ID" + std::to_string(currentId);
-        
-        std::string fPathStr(fPath);
-        std::string ext = "";
-        size_t dotPos = fPathStr.find_last_of('.');
-        if (dotPos != std::string::npos) {
-            ext = fPathStr.substr(dotPos);
-        }
-        std::string outPath = std::string(sPath) + "/" + ind + ext;
-        
-        encryptFileCBC(g_dsse->Get_Client_sk(), fPath, outPath);
-        encPaths.push_back(outPath);
+    for (int i = 0; i < (int)numFiles; i++) {
+        int kw = kws[i];
+        futures.push_back(std::async(std::launch::async, [=, &filePaths, &KS]() {
+            int currentId = (int)startingIdIndex + i;
+            std::string ind = "ID" + std::to_string(currentId);
+            std::string fPath = filePaths[i];
+            
+            // Extract extension
+            std::string ext = "";
+            size_t dotPos = fPath.find_last_of(".");
+            if (dotPos != std::string::npos) {
+                ext = fPath.substr(dotPos);
+            }
+            std::string outPath = encDir + "/" + ind + ext;
 
-        LOGI("Update_client called: file=%s, ID=%d, keyword=%d", ind.c_str(), currentId, (int)kws[i]);
+            // 1. Parallel Encryption - Renaming to ID{N}.ext
+            encryptFileCBC(g_dsse->Data.client_sk, fPath, outPath);
 
-        std::vector<std::tuple<std::string, std::string>> U_list;
-        Update_client(*g_dsse, true, ind, currentId, (int)kws[i], KS, U_list);
-
-        for (auto &tok : U_list) {
-            allTokens.push_back(toBase64(std::get<0>(tok)));
-            allTokens.push_back(toBase64(std::get<1>(tok)));
-        }
-        env->ReleaseStringUTFChars(js, fPath);
-        env->DeleteLocalRef(js);
+            // 2. Parallel Token Generation
+            std::vector<std::tuple<std::string, std::string>> U_list;
+            {
+                std::lock_guard<std::mutex> lock(g_update_mutex);
+                Update_client(*g_dsse, true, ind, currentId, kw, KS, U_list);
+            }
+            return U_list;
+        }));
     }
 
-    int total = (int)allTokens.size() + 1 + (int)encPaths.size();
-    jclass strCls = env->FindClass("java/lang/String");
-    jobjectArray ret = env->NewObjectArray(total, strCls, nullptr);
-
-    int idx = 0;
-    for (auto &t : allTokens) {
-        jstring js = env->NewStringUTF(t.c_str());
-        env->SetObjectArrayElement(ret, idx++, js);
-        env->DeleteLocalRef(js);
-    }
-    jstring sep = env->NewStringUTF("---FILES---");
-    env->SetObjectArrayElement(ret, idx++, sep);
-    env->DeleteLocalRef(sep);
-    for (auto &p : encPaths) {
-        jstring js = env->NewStringUTF(p.c_str());
-        env->SetObjectArrayElement(ret, idx++, js);
-        env->DeleteLocalRef(js);
+    std::vector<std::tuple<std::string, std::string>> total_list;
+    for (auto &f : futures) {
+        auto res = f.get();
+        total_list.insert(total_list.end(), res.begin(), res.end());
     }
 
-    env->ReleaseByteArrayElements(jKey, kData, JNI_ABORT);
     env->ReleaseIntArrayElements(jKeywords, kws, JNI_ABORT);
-    env->ReleaseStringUTFChars(jStoragePath, sPath);
-    return ret;
+
+    // Prepare java result
+    jclass pairClass = env->FindClass("com/example/psi/network/IndexPair");
+    if (!pairClass) {
+        LOGE("IndexPair class not found!");
+        return nullptr;
+    }
+    jmethodID pairConstructor = env->GetMethodID(pairClass, "<init>", "(Ljava/lang/String;Ljava/lang/String;)V");
+    
+    jobjectArray result = env->NewObjectArray((jsize)total_list.size(), pairClass, nullptr);
+    for (size_t i = 0; i < total_list.size(); i++) {
+        std::string key64 = toBase64(std::get<0>(total_list[i]));
+        std::string val64 = toBase64(std::get<1>(total_list[i]));
+        jobject pair = env->NewObject(pairClass, pairConstructor, env->NewStringUTF(key64.c_str()), env->NewStringUTF(val64.c_str()));
+        env->SetObjectArrayElement(result, (jsize)i, pair);
+        env->DeleteLocalRef(pair);
+    }
+
+    return result;
 }
 
 JNIEXPORT jobjectArray JNICALL
@@ -278,30 +331,39 @@ Java_com_example_psi_SearchActivity_performPostProcessing(
         return (p != std::string::npos) ? s.substr(0, p+1) : "";
     };
 
-    std::vector<bool> a_lbm(N, false), b_lbm(N, false), b_ebm(N, false);
+    std::vector<bool> res1_raw(N, false), res2_raw(N, false), b_ebm(N, false);
 
-    // Search 1 gives us less-than `a`.
-    for (auto &id : res1_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) a_lbm[idx] = true; } catch (...) {} }
-    
-    // We invert it directly to get GE
+    for (auto &id : res1_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) res1_raw[idx] = true; } catch (...) {} }
+    for (auto &id : res2_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) res2_raw[idx] = true; } catch (...) {} }
+    for (auto &id : res2_e) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) b_ebm[idx] = true; } catch (...) {} }
+
     std::vector<bool> a_ge_bm(N, false);
-    for (int i = 0; i < N; i++) a_ge_bm[i] = !a_lbm[i];
+    if (a <= m / 2) {
+        // When a <= m/2, res1_l gives us less-than `a`. So we invert to get >= `a`.
+        for (int i = 0; i < N; i++) a_ge_bm[i] = !res1_raw[i];
+    } else {
+        // When a > m/2, res1_l inherently gives us >= `a`. We use it directly.
+        for (int i = 0; i < N; i++) a_ge_bm[i] = res1_raw[i];
+    }
     
-    std::string b1_type = "ge"; // This is ALWAYS considered a "Greater than or Equal" condition logic-wise!
+    std::string b1_type = "ge"; // Greater than or Equal
     std::string b1_raw_str = "";
     for (int i = 0; i < N; i++) b1_raw_str += a_ge_bm[i] ? "1" : "0";
     LOGI("Search 1 (%s) bitmap: %s", b1_type.c_str(), b1_raw_str.c_str());
 
-    // Search 2 gives us less-than `b`.
-    for (auto &id : res2_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) b_lbm[idx] = true; } catch (...) {} }
+    std::vector<bool> b_lbm(N, false);
+    if (b <= m / 2) {
+        // When b <= m/2, res2_l gives us less-than `b`. Used directly.
+        for (int i = 0; i < N; i++) b_lbm[i] = res2_raw[i];
+    } else {
+        // When b > m/2, res2_l gives us >= `b`. Invert to get less-than `b`.
+        for (int i = 0; i < N; i++) b_lbm[i] = !res2_raw[i];
+    }
     
     std::string b2_type = "l";
     std::string b2_raw_str = "";
     for (int i = 0; i < N; i++) b2_raw_str += b_lbm[i] ? "1" : "0";
     LOGI("Search 2 (%s) bitmap: %s", b2_type.c_str(), b2_raw_str.c_str());
-    
-    // Search 2 ALSO gives us equal `b`.
-    for (auto &id : res2_e) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) b_ebm[idx] = true; } catch (...) {} }
     
     std::string b3_type = "e";
     std::string b3_raw_str = "";

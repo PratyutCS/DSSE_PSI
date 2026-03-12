@@ -1,16 +1,17 @@
 // We are implementing our proposed DSSE scheme supporting range query.
 #include "../src/Lambda.h"
-#include <bitset>
+#include <vector>
+#include <iostream>
+#include <chrono>
+#include <algorithm>
+#include <tuple>
+#include <random>
 
-#ifndef SIZE_ID
-#define SIZE_ID 10
-#endif
-#ifndef SIZE_KS
-#define SIZE_KS 10
-#endif
+using namespace std;
 
-const int Size_ID = SIZE_ID;
-const int Size_KS = SIZE_KS;
+// This is now dynamic. In the real application, it equals the file count from the server.
+int Size_ID = 23; 
+const int Size_KS = 1000;
 
 void ind_Depadding_FAST(std::string &ind)
 {
@@ -21,42 +22,52 @@ void ind_Depadding_FAST(std::string &ind)
         ind.clear();  // All characters were '_'
 }
 
-bitset<Size_ID> build_lbitmap(int &w, vector<string> inds)
+// Replaced fixed bitset with dynamic vector<bool> to support dynamic Size_ID
+vector<bool> build_lbitmap(int w, const vector<string>& inds)
 {
-    bitset<Size_ID> bitmap; // All bits are initialized to 0
+    vector<bool> bitmap(Size_ID, false);
 
-    if(w <=  Size_KS/2)
+    if(w <= Size_KS/2)
     {
         for(auto id : inds)
         {
-            ind_Depadding_FAST(id);
-            int index  = stoi(id);        
-            bitmap.set(Size_ID - 1 - index); // Set the corresponding bit to 1. Note: most-significant bit need to be set 1                                        
+            string depadded = id;
+            ind_Depadding_FAST(depadded);
+            try {
+                int index = stoi(depadded);
+                // In bitset logic: index 'idx' maps to position 'Size_ID - 1 - idx'
+                if (index >= 0 && index < Size_ID) bitmap[Size_ID - 1 - index] = true;
+            } catch(...) {}
         }
     }
     else
     {
         for(auto id : inds)
         {
-            ind_Depadding_FAST(id);
-            int index  = stoi(id);        
-            bitmap.set(Size_ID - 1 - index);                                        // Set the corresponding bit to 1. Note: most-significant bit need to be set 1                                         
+            string depadded = id;
+            ind_Depadding_FAST(depadded);
+            try {
+                int index = stoi(depadded);
+                if (index >= 0 && index < Size_ID) bitmap[Size_ID - 1 - index] = true;
+            } catch(...) {}
         }
-        bitmap.flip();
+        for(int i = 0; i < Size_ID; i++) bitmap[i] = !bitmap[i];
     }
    
     return bitmap;
 }
 
-bitset<Size_ID> build_ebitmap(int &w, vector<string> inds)
+vector<bool> build_ebitmap(int w, const vector<string>& inds)
 {
-    bitset<Size_ID> bitmap;                                                     // All bits are initialized to 0
-
+    vector<bool> bitmap(Size_ID, false);
     for(auto id : inds)
     {
-        ind_Depadding_FAST(id);
-        int index  = stoi(id);
-        bitmap.set(Size_ID - 1 - index);                                        // Set the corresponding bit to 1. Note: most-significant bit need to be set 1
+        string depadded = id;
+        ind_Depadding_FAST(depadded);
+        try {
+            int index = stoi(depadded);
+            if (index >= 0 && index < Size_ID) bitmap[Size_ID - 1 - index] = true;
+        } catch(...) {}
     }
     return bitmap;
 }
@@ -65,34 +76,28 @@ bitset<Size_ID> build_ebitmap(int &w, vector<string> inds)
 void Lambda_Setup(DSSE &FAST_)
 {
     cout << "============================= PSI: Setup =============================" << endl; 
-    
     Setup(FAST_);
-    
 }
 
-void Lambda_Update(DSSE &FAST_, vector<int> &Keyword_Space)
+void Lambda_Update(DSSE &FAST_, const vector<int> &Keyword_Space)
 {
     cout << "============================= PSI: Update =============================" << endl; 
     
     long double avg_uc = 0;
     long double avg_us = 0;
 
-
-    // Use a random device to seed the random number engine
     std::random_device rd; 
-    std::mt19937 gen(rd());                             // Mersenne Twister engine
+    std::mt19937 gen(rd());
 
-    // Create a uniform distribution in the given range
-    std::uniform_int_distribution<> distrib(0, Size_KS-1);
+    // Updating a subset of files for testing
+    int update_count = (Size_ID < 5) ? Size_ID : 5;
 
-    int update_token_size = 0;
-
-    for(int i = 0; i < Size_ID; i++)
+    for(int i = 0; i < update_count; i++)
     {   
         string ind = "ID" + to_string(i);
-        int w = i; //distrib(gen);
+        int w = i; // Keyword is same as ID for predictable testing
 
-        vector<tuple<string, string>> U_list;                                                       // Lambda Update Token List
+        vector<tuple<string, string>> U_list;
 
         auto u_c0 = chrono::high_resolution_clock::now();
         Update_client(FAST_, true, ind, i, w, Keyword_Space, U_list);
@@ -102,7 +107,6 @@ void Lambda_Update(DSSE &FAST_, vector<int> &Keyword_Space)
 
         auto u_s0 = chrono::high_resolution_clock::now();
         Update_server(FAST_, U_list);
-        update_token_size = update_token_size + U_list.size();
         auto u_s1 = chrono::high_resolution_clock::now();
         long double u_sd = chrono::duration_cast<chrono::microseconds>(u_s1 - u_s0).count();
 
@@ -115,10 +119,6 @@ void Lambda_Update(DSSE &FAST_, vector<int> &Keyword_Space)
 
     cout << "Average client-side update time (μs): " << avg_client_time << endl;
     cout << "Average server-side update time (μs): " << avg_server_time << endl;
-    cout << "Total update token size: " << update_token_size << endl;
-    cout << "Average update token size: " << update_token_size / Size_ID << endl;
-
-
 }   
 
 
@@ -127,37 +127,40 @@ void Lambda_Search_result(const tuple<int, int> &range_query, vector<string> &re
     
     // ####################### Client Side: Bitmap Generation and result interpretation #####################################################
 
-    bitset<Size_ID> a_lbm, a_ebm;
-    bitset<Size_ID> b_lbm, b_ebm;
-
     int a = get<0>(range_query);
     int b = get<1>(range_query);
 
-    // As this instant, we are considering only a <= x <= b type range query. To answer such queries, we only required l-bitmap of a, and l and e bitmap of b.
+    vector<bool> a_lbm = build_lbitmap(a, res1_l);
+    cout << "  [Search] Bitmap LT(" << a << ") : ";
+    for(int i = Size_ID - 1; i >= 0; i--) cout << (a_lbm[i] ? "1" : "0");
+    cout << endl;
 
-    a_lbm = build_lbitmap(a, res1_l);
-    //cout << "l-bitmap(" << get<0>(range_query) << ")= "<<  a_lbm << " and ";
+    vector<bool> b_lbm = build_lbitmap(b, res2_l);
+    cout << "  [Search] Bitmap LT(" << b << ") : ";
+    for(int i = Size_ID - 1; i >= 0; i--) cout << (b_lbm[i] ? "1" : "0");
+    cout << endl;
+
+    vector<bool> b_ebm = build_ebitmap(b, res2_e);
+    cout << "  [Search] Bitmap EQ(" << b << ") : ";
+    for(int i = Size_ID - 1; i >= 0; i--) cout << (b_ebm[i] ? "1" : "0");
+    cout << endl;
+
+    vector<bool> result(Size_ID);
+    for(int i = 0; i < Size_ID; i++) {
+        // ~LT(a) is !a_lbm[i]
+        result[i] = (!a_lbm[i]) && (b_lbm[i] || b_ebm[i]);
+    }
+
+    cout << "  [Search] Final Logic Result (~LT(a) & (LT(b)|EQ(b))): ";
+    for(int i = Size_ID - 1; i >= 0; i--) cout << (result[i] ? "1" : "0");
+    cout << endl;
     
-
-    // a_ebm = build_bitmap(bitmap_length, res1_e);
-    // cout << "e-bitmap(" << get<0>(range_query) << ") = " << a_ebm << endl;
-
-    b_lbm = build_lbitmap(b, res2_l);
-    //cout << "l-bitmap(" << get<1>(range_query) <<")= " << b_lbm << " and ";
-
-    b_ebm = build_ebitmap(b, res2_e);
-    //cout << "e-bitmap(" << get<1>(range_query) << ")= " << b_ebm << endl;
-
-    //cout << "Search Result for the query q: [" << get<0>(range_query) << ", " << get<1>(range_query) << "]" << endl;
-    
-    auto result = ((~a_lbm) & (b_lbm | b_ebm));
-  //cout << "Result: " << result << endl;                                                         // Equivalent to NOT(l-bm(a)) AND (l-bm(b) AND e-bm(b))
-    
+    cout << "Matching IDs found:" << endl;
     for (int i = Size_ID - 1; i >= 0; --i) 
     {
-        if (result.test(i)) 
+        if (result[i]) 
         {
-            cout << "ID" << Size_ID - 1 - i << endl;
+            cout << "-> ID" << (Size_ID - 1 - i) << endl;
         }
     }
 
@@ -211,8 +214,8 @@ int main()
 
     while(choice == 'y' || choice == 'Y')
     {
-        cout << "FAST: Enter Choice (Update/Search) : (1/2)" << endl;                 // Getting the client secret key from the DSSE class
-        cin >> expression;
+        cout << "FAST: Enter Choice (Update/Search/SetSize) : (1/2/3)" << endl;
+        if (!(cin >> expression)) break;
         switch (expression)
         {
             case 1: 
@@ -229,6 +232,11 @@ int main()
                 Lambda_Search(FAST_, Keyword_Space, range_query);
                 break;
             
+            case 3:
+                cout << "Current Size_ID is " << Size_ID << ". Enter new size: ";
+                cin >> Size_ID;
+                break;
+
             default:
                 cout << "The entered option is not correct" << endl;
                 break;
@@ -239,11 +247,3 @@ int main()
     
     return 0;
 }
-
-    /*
-    * The search query to be performed in the very specific manner. Here is the format for the range query. 
-    * q: v1 Delta1 x Delta2 v2,                                     where Deltai belongs to {<, <=, >, >=, =} 
-    * q ask to find the identifiers (x) whose range value satisfies the inequalities as specified in q.
-    */
-
-    

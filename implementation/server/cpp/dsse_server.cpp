@@ -56,6 +56,10 @@ public:
         rocksdb::Options options;
         options.create_if_missing = true;
         
+        // Performance Tweak: Optimized for concurrent access
+        options.IncreaseParallelism();
+        options.OptimizeLevelStyleCompaction();
+        
         // Server only needs map2
         rocksdb::Status status = rocksdb::DB::Open(options, dbPath, &Data.map2);
         if (!status.ok()) {
@@ -105,6 +109,7 @@ int main(int argc, char* argv[]) {
         }
 
     } else if (opCode == 2) { // Batch Update - read key\tvalue pairs from stdin
+        rocksdb::WriteBatch batch;
         string line;
         int count = 0;
         while (getline(cin, line)) {
@@ -118,8 +123,17 @@ int main(int argc, char* argv[]) {
 
             if (key.empty() || value.empty()) continue;
 
-            dsse.Update_server(make_tuple(key, value));
+            batch.Put(key, value);
             count++;
+
+            // Periodically commit large batches to avoid huge memory spike
+            if (count % 10000 == 0) {
+                dsse.Data.map2->Write(rocksdb::WriteOptions(), &batch);
+                batch.Clear();
+            }
+        }
+        if (count % 10000 != 0) {
+            dsse.Data.map2->Write(rocksdb::WriteOptions(), &batch);
         }
         cout << "Batch update successful: " << count << " entries" << endl;
 

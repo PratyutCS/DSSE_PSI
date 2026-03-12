@@ -43,7 +43,22 @@ public class UpdateActivity extends AppCompatActivity {
     static { System.loadLibrary("psi"); }
 
     // JNI: Add files → returns [u0,e0,…, "---FILES---", path0,path1,…]
-    private native String[] generateUpdateTokens(String storagePath, byte[] key, int kwSpaceSize, String[] filePaths, int[] keywords, int startingIdIndex);
+    private native com.example.psi.network.IndexPair[] generateUpdateTokens(String storagePath, byte[] key, int kwSpaceSize, String[] filePaths, int[] keywords, int startingIdIndex);
+    
+    // Helper to get encrypted file paths (since they are in storagePath/encrypted/ID{N}.ext)
+    private String[] getEncryptedPaths(String storagePath, int startingId, String[] originalPaths) {
+        String[] encPaths = new String[originalPaths.length];
+        for (int i = 0; i < originalPaths.length; i++) {
+            String fPath = originalPaths[i];
+            String ext = "";
+            int dotPos = fPath.lastIndexOf(".");
+            if (dotPos != -1) {
+                ext = fPath.substring(dotPos);
+            }
+            encPaths[i] = storagePath + "/encrypted/ID" + (startingId + i) + ext;
+        }
+        return encPaths;
+    }
     // JNI: Delete signal → returns [u0,e0,…]
     private native String[] generateDeleteTokens(String storagePath, byte[] key, int kwSpaceSize, String[] identifiers, int[] keywords);
 
@@ -151,10 +166,15 @@ public class UpdateActivity extends AppCompatActivity {
     }
 
     private void performUpdate() {
-        String dbName = spinnerSpaces.getSelectedItem().toString();
+        String dbName = (spinnerSpaces.getSelectedItem() != null) ? spinnerSpaces.getSelectedItem().toString() : "";
         int maxKw = KW_SPACE_SIZE - 1;
         
-        // Input validation before starting background work
+        if (dbName.isEmpty() || dbName.equals("No spaces available")) {
+            Toast.makeText(this, "Select a space first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Input validation
         if (isAddMode) {
             for (FileItem item : selectedFiles) {
                 try {
@@ -187,21 +207,26 @@ public class UpdateActivity extends AppCompatActivity {
         String ip    = prefs.getString("last_ip", BuildConfig.SERVER_IP);
         String baseUrl = "http://" + ip + ":3000/api";
 
+        // Logic UI grey-out
         setUIEnabled(false);
         tvProgress.setVisibility(View.VISIBLE);
         progressBar.setVisibility(View.VISIBLE);
+        progressBar.setIndeterminate(false);
         progressBar.setProgress(0);
-        tvProgress.setText("Initializing Cryptography...");
+        tvProgress.setText("Preparing...");
 
         new Thread(() -> {
             try {
                 String storagePath = getDbStoragePath(dbName);
                 byte[] spaceKey = CryptoUtils.getSpaceKey(this, dbName);
-                String[] jniResult;
 
                 if (isAddMode) {
-                    // ---- ADD mode ----
-                    runOnUiThread(() -> tvProgress.setText("Generating Secure Tokens (0%)"));
+                    // ---- PHASE 1: ENCRYPTION & TOKEN GENERATION ----
+                    runOnUiThread(() -> {
+                        tvProgress.setText("Phase 1/3: Encrypting Files & Generating Tokens...");
+                        progressBar.setProgress(10);
+                    });
+
                     String[] paths = new String[selectedFiles.size()];
                     int[] kws      = new int[selectedFiles.size()];
                     for (int i = 0; i < selectedFiles.size(); i++) {
@@ -210,87 +235,87 @@ public class UpdateActivity extends AppCompatActivity {
                         kws[i] = kwStr.isEmpty() ? 0 : Integer.parseInt(kwStr);
                     }
 
-                    // Fetch server-side fileCount for unique IDs
+                    // Fetch starting ID
                     String infoUrl = baseUrl + "/get-space-info?dbName=" + Uri.encode(dbName);
                     String infoResp = NetworkUtils.performGetRequest(infoUrl, token);
                     int startingId = new JSONObject(infoResp).getInt("fileCount");
 
-                    jniResult = generateUpdateTokens(storagePath, spaceKey, KW_SPACE_SIZE, paths, kws, startingId);
-                    if (jniResult == null) throw new Exception("Native token generation returned null");
+                    com.example.psi.network.IndexPair[] pairsList = generateUpdateTokens(storagePath, spaceKey, KW_SPACE_SIZE, paths, kws, startingId);
+                    if (pairsList == null) throw new Exception("Native token generation failed");
 
-                    int sepIdx = -1;
-                    for (int i = 0; i < jniResult.length; i++) {
-                        if ("---FILES---".equals(jniResult[i])) { sepIdx = i; break; }
-                    }
-                    if (sepIdx < 0) throw new Exception("Separator not found in JNI result");
+                    // ---- PHASE 2: UPLOADING SECURE INDEXES ----
+                    int batchSize = 5000;
+                    int totalItems = pairsList.length;
+                    int totalBatches = (int) Math.ceil((double) totalItems / batchSize);
 
-                    int batchSize = 10000;
-                    int totalBatches = (int) Math.ceil((double) sepIdx / (batchSize * 2));
-                    int currentBatch = 0;
-
-                    for (int i = 0; i < sepIdx; i += batchSize * 2) {
-                        currentBatch++;
-                        int finalCurrentBatch = currentBatch;
+                    for (int i = 0; i < totalItems; i += batchSize) {
+                        int finalI = i;
+                        int currentBatch = (i / batchSize) + 1;
                         runOnUiThread(() -> {
-                            int pct = (int) (((double) finalCurrentBatch / totalBatches) * 50); // Scale to 50%
+                            int pct = 10 + (int) (((double) finalI / totalItems) * 40); // 10% to 50%
                             progressBar.setProgress(pct);
-                            tvProgress.setText(String.format("Uploading Secure Indexes (%d/%d)...", finalCurrentBatch, totalBatches));
+                            tvProgress.setText(String.format("Phase 2/3: Uploading Secure Indexes (%d/%d)...", currentBatch, totalBatches));
                         });
 
-                        JSONArray pairs = new JSONArray();
-                        int end = Math.min(i + batchSize * 2, sepIdx);
-                        for (int j = i; j < end; j += 2) {
-                            JSONObject pair = new JSONObject();
-                            pair.put("key",   jniResult[j]);
-                            pair.put("value", jniResult[j + 1]);
-                            pairs.put(pair);
+                        JSONArray jsonPairs = new JSONArray();
+                        int end = Math.min(i + batchSize, totalItems);
+                        for (int j = i; j < end; j++) {
+                            JSONObject pairObj = new JSONObject();
+                            pairObj.put("key",   pairsList[j].key);
+                            pairObj.put("value", pairsList[j].value);
+                            jsonPairs.put(pairObj);
                         }
                         JSONObject body = new JSONObject();
                         body.put("dbName", dbName);
-                        body.put("pairs", pairs);
+                        body.put("pairs", jsonPairs);
                         NetworkUtils.performPostRequest(baseUrl + "/bulk-save-index_value", body.toString(), token);
                     }
 
+                    // ---- PHASE 3: UPLOADING ENCRYPTED FILES ----
                     runOnUiThread(() -> {
-                        tvProgress.setText("Encrypting and Uploading Files...");
-                        progressBar.setProgress(75);
+                        tvProgress.setText("Phase 3/3: Uploading Encrypted Files...");
+                        progressBar.setProgress(70);
                     });
 
-                    List<String> encPaths = new ArrayList<>();
-                    for (int i = sepIdx + 1; i < jniResult.length; i++)
-                        encPaths.add(jniResult[i]);
-                    NetworkUtils.performMultipartRequest(baseUrl + "/upload_files", dbName, encPaths, token);
+                    String[] encPaths = getEncryptedPaths(storagePath, startingId, paths);
+                    List<String> encPathsList = new ArrayList<>();
+                    for(String p : encPaths) encPathsList.add(p);
+                    
+                    NetworkUtils.performMultipartRequest(baseUrl + "/upload_files", dbName, encPathsList, token);
 
+                    runOnUiThread(() -> progressBar.setProgress(90));
+
+                    // Cleanup
                     for (String p : encPaths) new File(p).delete();
                     for (FileItem item : selectedFiles) new File(item.localPath).delete();
                     selectedFiles.clear();
 
                 } else {
-                    // ---- DELETE mode ----
-                    runOnUiThread(() -> tvProgress.setText("Generating Secure Delete Signal..."));
+                    // ---- DELETE MODE ----
+                    runOnUiThread(() -> {
+                        tvProgress.setText("Generating Secure Delete Signal...");
+                        progressBar.setProgress(30);
+                    });
                     
                     String targetId  = etTargetId.getText().toString().trim();
                     int    targetKw  = Integer.parseInt(etTargetKeywords.getText().toString().trim());
 
-                    jniResult = generateDeleteTokens(storagePath, spaceKey, KW_SPACE_SIZE,
+                    String[] jniResult = generateDeleteTokens(storagePath, spaceKey, KW_SPACE_SIZE,
                             new String[]{targetId}, new int[]{targetKw});
-                    if (jniResult == null) throw new Exception("Native delete token generation returned null");
+                    if (jniResult == null) throw new Exception("Native delete token generation failed");
 
-                    int batchSize = 10000;
-                    int totalBatches = (int) Math.ceil((double) jniResult.length / (batchSize * 2));
-                    int currentBatch = 0;
-
-                    for (int i = 0; i < jniResult.length; i += batchSize * 2) {
-                        currentBatch++;
-                        int finalCurrentBatch = currentBatch;
+                    int batchSize = 5000;
+                    int totalItems = jniResult.length;
+                    for (int i = 0; i < totalItems; i += batchSize * 2) {
+                        int finalI = i;
                         runOnUiThread(() -> {
-                            int pct = (int) (((double) finalCurrentBatch / totalBatches) * 100); 
+                            int pct = 30 + (int) (((double) finalI / totalItems) * 60); 
                             progressBar.setProgress(pct);
-                            tvProgress.setText(String.format("Propagating Delete Signal (%d/%d)...", finalCurrentBatch, totalBatches));
+                            tvProgress.setText("Propagating Delete Signal...");
                         });
 
                         JSONArray pairs = new JSONArray();
-                        int end = Math.min(i + batchSize * 2, jniResult.length);
+                        int end = Math.min(i + batchSize * 2, totalItems);
                         for (int j = i; j < end; j += 2) {
                             JSONObject pair = new JSONObject();
                             pair.put("key",   jniResult[j]);
@@ -310,14 +335,14 @@ public class UpdateActivity extends AppCompatActivity {
                     setUIEnabled(true);
                     Toast.makeText(this, "Update successful!", Toast.LENGTH_LONG).show();
                     fileAdapter.notifyDataSetChanged();
-                    finish();
+                    new Handler(Looper.getMainLooper()).postDelayed(this::finish, 1000);
                 });
 
             } catch (Exception e) {
                 Log.e(TAG, "Update failed", e);
                 runOnUiThread(() -> {
                     setUIEnabled(true);
-                    tvProgress.setText("Update Failed");
+                    tvProgress.setText("Update Failed: " + e.getMessage());
                     progressBar.setProgress(0);
                     Toast.makeText(this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 });

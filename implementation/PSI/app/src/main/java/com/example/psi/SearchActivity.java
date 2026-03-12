@@ -46,10 +46,11 @@ public class SearchActivity extends AppCompatActivity {
     private AutoCompleteTextView actvSpaceSelector;
     private android.widget.EditText etParam1, etParam2;
     private Button btnConnect;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService executor = Executors.newFixedThreadPool(4); // Use pool for parallel tasks
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    private TextView tvResultsTitle, tvResults;
+    private TextView tvResultsTitle, tvResults, tvProgress;
+    private android.widget.ProgressBar progressBar;
     private View svResults;
 
     private static final String TAG = "PSI_SEARCH";
@@ -65,6 +66,8 @@ public class SearchActivity extends AppCompatActivity {
         etParam1 = findViewById(R.id.etParam1);
         etParam2 = findViewById(R.id.etParam2);
         btnConnect = findViewById(R.id.btnConnect);
+        tvProgress = findViewById(R.id.tvProgress);
+        progressBar = findViewById(R.id.progressBar);
 
         TextView toolbarTitle = findViewById(R.id.toolbarTitle);
         toolbarTitle.setText("PRIVATE SEARCH");
@@ -85,13 +88,21 @@ public class SearchActivity extends AppCompatActivity {
         else finish();
     }
 
+    private void setUIEnabled(boolean enabled) {
+        btnConnect.setEnabled(enabled);
+        btnConnect.setAlpha(enabled ? 1.0f : 0.5f);
+        actvSpaceSelector.setEnabled(enabled);
+        etParam1.setEnabled(enabled);
+        etParam2.setEnabled(enabled);
+    }
+
     private void performSearch() {
         String dbName = actvSpaceSelector.getText().toString().trim();
         String p1 = etParam1.getText().toString().trim();
         String p2 = etParam2.getText().toString().trim();
 
-        if (dbName.isEmpty() || dbName.equals("Select Space")) {
-            Toast.makeText(this, "Please select a space", Toast.LENGTH_SHORT).show();
+        if (dbName.isEmpty() || dbName.equals("Select Space") || dbName.equals("No spaces found.")) {
+            Toast.makeText(this, "Please select a valid space", Toast.LENGTH_SHORT).show();
             return;
         }
         if (p1.isEmpty() || p2.isEmpty()) {
@@ -111,8 +122,6 @@ public class SearchActivity extends AppCompatActivity {
         if (aVal < 0 || aVal >= KW_SPACE_SIZE || bVal < 0 || bVal >= KW_SPACE_SIZE) {
             int maxKw = KW_SPACE_SIZE - 1;
             Toast.makeText(this, "Keywords must be between 0 and " + maxKw + ".", Toast.LENGTH_LONG).show();
-            etParam1.setError("Must be 0 to " + maxKw);
-            etParam2.setError("Must be 0 to " + maxKw);
             return;
         }
 
@@ -128,26 +137,24 @@ public class SearchActivity extends AppCompatActivity {
             return;
         }
 
-        Toast.makeText(this, "Searching…", Toast.LENGTH_SHORT).show();
+        // Logic UI grey-out
+        setUIEnabled(false);
+        tvProgress.setVisibility(View.VISIBLE);
+        progressBar.setVisibility(View.VISIBLE);
+        progressBar.setProgress(0);
+        tvProgress.setText("Phase 1/2: Recovering Secure Bitmaps...");
 
         executor.execute(() -> {
             try {
-                File downloadDir  = new File(getFilesDir(), "downloads");
-                File decryptedDir = new File(Environment.getExternalStorageDirectory(), "PSI_SearchResults");
-                clearDirectories(downloadDir, decryptedDir);
-
                 String storagePath = getDbStoragePath(dbName);
                 byte[] spaceKey = CryptoUtils.getSpaceKey(this, dbName);
-                int a = Integer.parseInt(p1);
-                int b = Integer.parseInt(p2);
 
-                Log.i(TAG, "SearchActivity calling getSearchTokens with keywords: a=" + a + ", b=" + b);
+                // --- 1. Token Generation ---
+                handler.post(() -> progressBar.setProgress(10));
+                String[] tokens = getSearchTokens(storagePath, spaceKey, aVal, bVal, KW_SPACE_SIZE);
+                if (tokens == null || tokens.length < 12) throw new Exception("Native tokens failed");
 
-                Log.i(TAG, "Generating search tokens for [" + a + ", " + b + "]");
-                String[] tokens = getSearchTokens(storagePath, spaceKey, a, b, KW_SPACE_SIZE);
-                if (tokens == null || tokens.length < 12)
-                    throw new Exception("getSearchTokens returned invalid data");
-
+                // --- 2. Server Index Fetching ---
                 String[][] serverResults = new String[4][];
                 for (int i = 0; i < 4; i++) {
                     int off = i * 3;
@@ -156,98 +163,106 @@ public class SearchActivity extends AppCompatActivity {
                         serverResults[i] = new String[0];
                         continue;
                     }
-                    String url = searchUrl
-                            + "?dbName="        + Uri.encode(dbName)
-                            + "&keyword_token=" + Uri.encode(tokens[off])
-                            + "&state_token="   + Uri.encode(tokens[off + 1])
-                            + "&count="         + countStr;
-                    try {
-                        String resp = NetworkUtils.performGetRequest(url, token);
-                        JSONArray arr = new JSONObject(resp).getJSONArray("results");
-                        serverResults[i] = new String[arr.length()];
-                        for (int j = 0; j < arr.length(); j++)
-                            serverResults[i][j] = arr.getString(j);
-                    } catch (Exception e) {
-                        serverResults[i] = new String[0];
-                    }
+                    String url = searchUrl + "?dbName=" + Uri.encode(dbName) + "&keyword_token=" + Uri.encode(tokens[off]) + "&state_token=" + Uri.encode(tokens[off + 1]) + "&count=" + countStr;
+                    String resp = NetworkUtils.performGetRequest(url, token);
+                    JSONArray arr = new JSONObject(resp).getJSONArray("results");
+                    serverResults[i] = new String[arr.length()];
+                    for (int j = 0; j < arr.length(); j++) serverResults[i][j] = arr.getString(j);
+                    
+                    int finalI = i;
+                    handler.post(() -> progressBar.setProgress(20 + finalI * 10));
                 }
 
-                // Fetch current fileCount for bitmap dimensioning
+                // --- 3. Post Processing & Bitmap recovery ---
                 String infoUrl = "http://" + ip + ":3000/api/get-space-info?dbName=" + Uri.encode(dbName);
                 String infoResp = NetworkUtils.performGetRequest(infoUrl, token);
                 int numIDs = new JSONObject(infoResp).getInt("fileCount");
 
-                String[] postProcessRes = performPostProcessing(numIDs, KW_SPACE_SIZE,
-                        serverResults[0], serverResults[1],
-                        serverResults[2], serverResults[3],
-                        a, b);
+                String[] postProcessRes = performPostProcessing(numIDs, KW_SPACE_SIZE, serverResults[0], serverResults[1], serverResults[2], serverResults[3], aVal, bVal);
+                if (postProcessRes == null || postProcessRes.length < 4) throw new Exception("Processing failed");
 
-                if (postProcessRes == null || postProcessRes.length < 4) {
-                    throw new Exception("performPostProcessing returned invalid data");
-                }
-
-                String bitmapsStr = "Search 1 (Kw: " + a + ", " + postProcessRes[0] + "\n" +
-                                    "Search 2 (Kw: " + b + ", " + postProcessRes[1] + "\n" +
-                                    "Search 2 (Kw: " + b + ", " + postProcessRes[2] + "\n" +
-                                    "Resultant bitmap: " + postProcessRes[3] + "\n\n";
-
-                int[] matchedIds = new int[postProcessRes.length - 4];
+                String bitmapsStr = "Search 1: " + postProcessRes[0] + "\nSearch 2: " + postProcessRes[1] + "\nCombined: " + postProcessRes[3] + "\n\n";
+                List<Integer> matchedIds = new ArrayList<>();
                 for (int i = 4; i < postProcessRes.length; i++) {
-                    try {
-                        matchedIds[i - 4] = Integer.parseInt(postProcessRes[i]);
-                    } catch (Exception e) {}
+                    try { matchedIds.add(Integer.parseInt(postProcessRes[i])); } catch (Exception ignored) {}
                 }
 
-                if (!downloadDir.exists()) downloadDir.mkdirs();
-                if (!decryptedDir.exists()) decryptedDir.mkdirs();
-
-                for (int id : matchedIds) {
-                    String fileId = "ID" + id;
-                    String dlUrl = "http://" + ip + ":3000/api/download-file?dbName=" + dbName + "&fileId=" + fileId;
-                    try {
-                        String dlName = NetworkUtils.downloadFile(dlUrl, downloadDir.getAbsolutePath(), token);
-                        File encFile = new File(downloadDir, dlName);
-
-                        // Separate out the extension and put it back behind the decrypted file
-                        String extension = "";
-                        int dotIndex = dlName.lastIndexOf('.');
-                        if (dotIndex > 0) {
-                            extension = dlName.substring(dotIndex);
-                        }
-                        
-                        String decryptedFileName = fileId + "_decrypted" + extension;
-                        File decFile = new File(decryptedDir, decryptedFileName);
-
-                        decryptResultFile(storagePath, spaceKey, encFile.getAbsolutePath(), decFile.getAbsolutePath());
-                    } catch (Exception e) {
-                        Log.e(TAG, "Download/decrypt error for " + fileId, e);
-                    }
-                }
-
+                // --- SHOW RESULTS IMMEDIATELY ---
                 handler.post(() -> {
                     tvResultsTitle.setVisibility(View.VISIBLE);
                     svResults.setVisibility(View.VISIBLE);
-
-                    if (matchedIds.length == 0) {
-                        Toast.makeText(this, "No matching records", Toast.LENGTH_LONG).show();
+                    if (matchedIds.isEmpty()) {
                         tvResults.setText(bitmapsStr + "No matching records found.");
+                        tvProgress.setText("Search Complete (No Matches)");
+                        progressBar.setProgress(100);
+                        setUIEnabled(true);
                     } else {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append(bitmapsStr);
-                        sb.append("Files recovered to: ").append(decryptedDir.getAbsolutePath()).append("\n\n");
-                        for (int i = 0; i < matchedIds.length; i++) {
-                            sb.append("ID").append(matchedIds[i]);
-                            if (i < matchedIds.length - 1) sb.append(", ");
-                            if ((i + 1) % 5 == 0) sb.append("\n");
-                        }
+                        StringBuilder sb = new StringBuilder(bitmapsStr);
+                        sb.append("IDs Found: ").append(matchedIds.toString()).append("\n\n");
+                        sb.append("Status: Fetching files in background...\n");
                         tvResults.setText(sb.toString());
-                        Toast.makeText(this, "Found " + matchedIds.length + " match(es)!", Toast.LENGTH_LONG).show();
+                        tvProgress.setText("Phase 2/2: Fetching & Decrypting Files...");
+                        progressBar.setProgress(60);
                     }
+                });
+
+                if (matchedIds.isEmpty()) return;
+
+                // --- 4. Parallel Background File Fetching ---
+                File downloadDir  = new File(getFilesDir(), "downloads");
+                File decryptedDir = new File(Environment.getExternalStorageDirectory(), "PSI_SearchResults");
+                clearDirectories(downloadDir, decryptedDir);
+                if (!downloadDir.exists()) downloadDir.mkdirs();
+                if (!decryptedDir.exists()) decryptedDir.mkdirs();
+
+                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(matchedIds.size());
+                java.util.concurrent.atomic.AtomicInteger finishedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+                for (int id : matchedIds) {
+                    executor.execute(() -> {
+                        String fileId = "ID" + id;
+                        String dlUrl = "http://" + ip + ":3000/api/download-file?dbName=" + dbName + "&fileId=" + fileId;
+                        try {
+                            String dlName = NetworkUtils.downloadFile(dlUrl, downloadDir.getAbsolutePath(), token);
+                            File encFile = new File(downloadDir, dlName);
+                            
+                            String extension = "";
+                            int dotIndex = dlName.lastIndexOf('.');
+                            if (dotIndex > 0) extension = dlName.substring(dotIndex);
+                            
+                            File decFile = new File(decryptedDir, fileId + "_decrypted" + extension);
+                            decryptResultFile(storagePath, spaceKey, encFile.getAbsolutePath(), decFile.getAbsolutePath());
+                        } catch (Exception e) {
+                            Log.e(TAG, "Parallel fetch error for " + fileId, e);
+                        } finally {
+                            int total = finishedCount.incrementAndGet();
+                            handler.post(() -> {
+                                int pct = 60 + (int) (((double) total / matchedIds.size()) * 40);
+                                progressBar.setProgress(pct);
+                            });
+                            latch.countDown();
+                        }
+                    });
+                }
+
+                latch.await();
+
+                handler.post(() -> {
+                    tvResults.append("\nAll matched files saved to: " + decryptedDir.getAbsolutePath());
+                    tvProgress.setText("All Files Recovered!");
+                    progressBar.setProgress(100);
+                    setUIEnabled(true);
+                    Toast.makeText(this, "Found " + matchedIds.size() + " files!", Toast.LENGTH_LONG).show();
                 });
 
             } catch (Exception e) {
                 Log.e(TAG, "Search failed", e);
-                handler.post(() -> Toast.makeText(this, "Search failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                handler.post(() -> {
+                    setUIEnabled(true);
+                    tvProgress.setText("Search Failed");
+                    progressBar.setProgress(0);
+                    Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
             }
         });
     }
