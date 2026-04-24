@@ -324,7 +324,8 @@ Java_com_example_psi_SearchActivity_performPostProcessing(
         }
         return v;
     };
-    auto res1_l = toVec(jR1l); auto res2_l = toVec(jR2l); auto res2_e = toVec(jR2e);
+    auto res1_l = toVec(jR1l); auto res1_e = toVec(jR1e);
+    auto res2_l = toVec(jR2l); auto res2_e = toVec(jR2e);
     int N = (int)numIDs; int m = (int)kwSpaceSize;
     auto depad = [](std::string s) -> std::string {
         size_t p = s.find_last_not_of('_');
@@ -333,9 +334,41 @@ Java_com_example_psi_SearchActivity_performPostProcessing(
 
     std::vector<bool> res1_raw(N, false), res2_raw(N, false), b_ebm(N, false);
 
-    for (auto &id : res1_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) res1_raw[idx] = true; } catch (...) {} }
-    for (auto &id : res2_l) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) res2_raw[idx] = true; } catch (...) {} }
-    for (auto &id : res2_e) { std::string d = depad(id); try { int idx = std::stoi(d); if (idx >= 0 && idx < N) b_ebm[idx] = true; } catch (...) {} }
+    auto processRes = [&](const std::vector<std::string>& res, std::vector<bool>& bitmap) {
+        for (auto &id : res) {
+            std::string d = depad(id);
+            try {
+                int val = std::stoi(d);
+                int suffix = val % 10;
+                int idx = val / 10;
+                if (suffix == 1 && idx >= 0 && idx < N) bitmap[idx] = true;
+            } catch (...) {}
+        }
+    };
+
+    processRes(res1_l, res1_raw);
+    processRes(res2_l, res2_raw);
+    processRes(res2_e, b_ebm);
+
+    // Cross-check all result sets for any '0' suffix (deletions)
+    auto handleDeletions = [&](const std::vector<std::string>& res) {
+        for (auto &id : res) {
+            std::string d = depad(id);
+            try {
+                int val = std::stoi(d);
+                if (val % 10 == 0) {
+                    int idx = val / 10;
+                    if (idx >= 0 && idx < N) {
+                        res1_raw[idx] = false;
+                        res2_raw[idx] = false;
+                        b_ebm[idx] = false;
+                    }
+                }
+            } catch (...) {}
+        }
+    };
+    handleDeletions(res1_l); handleDeletions(res1_e);
+    handleDeletions(res2_l); handleDeletions(res2_e);
 
     std::vector<bool> a_ge_bm(N, false);
     if (a <= m / 2) {
