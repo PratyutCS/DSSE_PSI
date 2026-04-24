@@ -8,9 +8,9 @@ rm -rf Server_map1 Server_map2 Server_map3 Sigma_map1
 # =================== COMPILATION ===================
 echo "Compiling source files..."
 g++ -o main main.cpp \
-    ../../../FAST/Setup.cpp \
-    ../../../FAST/Update.cpp \
-    ../../../FAST/Search.cpp \
+    ../../FAST/Setup.cpp \
+    ../../FAST/Update.cpp \
+    ../../FAST/Search.cpp \
     ../src/Setup.cpp ../src/Update.cpp ../src/Search.cpp ../src/Utilities.cpp \
     -lcryptopp -lrocksdb
 
@@ -30,6 +30,7 @@ echo "Running program with automated input..."
 # # 9   → b = 9
 # # n   → Exit
 # echo -e "1\ny\n2\n0\n9999\nn" | ./main > main.txt
-./main
+echo -e "1\nn" | ./main
+# ./main
 
 # echo "Execution completed. Output saved to main.txt"
